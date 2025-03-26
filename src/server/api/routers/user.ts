@@ -7,6 +7,7 @@ export const userRouter = createTRPCRouter({
   }),
 
   getUserById: publicProcedure.input(z.string()).query(async ({ ctx, input }) => {
+    console.log("Received input:", input);
     return await ctx.db.user.findUnique({ where: { id: input } });
   }),
 
