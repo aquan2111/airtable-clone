@@ -2,6 +2,19 @@ import { createTRPCRouter, protectedProcedure, publicProcedure } from "../trpc";
 import { z } from "zod";
 
 export const userRouter = createTRPCRouter({
+  hello: publicProcedure.input(z.object({ text: z.string() })).query(({ input }) => {
+    console.log(input);
+      return {
+        greeting: `Hello ${input.text}`,
+      };
+    }),
+
+  hallo: publicProcedure.query(({ }) => {
+      return {
+        greeting: `Hallo`,
+      };
+    }),
+
   getAllUsers: publicProcedure.query(async ({ ctx }) => {
     return await ctx.db.user.findMany();
   }),
