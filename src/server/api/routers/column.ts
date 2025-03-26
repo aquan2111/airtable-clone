@@ -12,8 +12,8 @@ export const columnRouter = createTRPCRouter({
     });
   }),
 
-  getColumnById: protectedProcedure.input(z.string()).query(async ({ ctx, input }) => {
-    return await ctx.db.column.findUnique({ where: { id: input } });
+  getColumnById: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
+    return await ctx.db.column.findUnique({ where: { id: input.id } });
   }),
 
   createColumn: protectedProcedure

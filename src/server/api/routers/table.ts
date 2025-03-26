@@ -12,8 +12,8 @@ export const tableRouter = createTRPCRouter({
     });
   }),
 
-  getTableById: protectedProcedure.input(z.string()).query(async ({ ctx, input }) => {
-      return await ctx.db.table.findUnique({ where: { id: input } });
+  getTableById: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
+      return await ctx.db.table.findUnique({ where: { id: input.id } });
     }),
 
   createTable: protectedProcedure

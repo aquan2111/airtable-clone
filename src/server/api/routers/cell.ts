@@ -18,8 +18,8 @@ export const cellRouter = createTRPCRouter({
     });
   }),
 
-  getCellById: protectedProcedure.input(z.string()).query(async ({ ctx, input }) => {
-    return await ctx.db.cell.findUnique({ where: { id: input } });
+  getCellById: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
+    return await ctx.db.cell.findUnique({ where: { id: input.id } });
   }),
 
   createCell: protectedProcedure

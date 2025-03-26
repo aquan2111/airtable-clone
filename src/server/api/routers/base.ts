@@ -12,8 +12,8 @@ export const baseRouter = createTRPCRouter({
     });
   }),
 
-  getBaseById: protectedProcedure.input(z.string()).query(async ({ ctx, input }) => {
-    return await ctx.db.base.findUnique({ where: { id: input } });
+  getBaseById: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
+    return await ctx.db.base.findUnique({ where: { id: input.id } });
   }),
 
   createBase: protectedProcedure
