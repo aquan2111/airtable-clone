@@ -12,9 +12,11 @@ export const baseRouter = createTRPCRouter({
     });
   }),
 
-  getBaseById: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
-    return await ctx.db.base.findUnique({ where: { id: input.id } });
-  }),
+  getBaseById: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .query(async ({ ctx, input }) => {
+      return await ctx.db.base.findUnique({ where: { id: input.id } });
+    }),
 
   createBase: protectedProcedure
     .input(z.object({ name: z.string().min(1) }))
@@ -28,5 +30,13 @@ export const baseRouter = createTRPCRouter({
     .input(z.object({ id: z.string(), name: z.string().min(1).optional() }))
     .mutation(async ({ ctx, input }) => {
       return await ctx.db.base.update({ where: { id: input.id }, data: input });
+    }),
+
+  deleteBase: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      return await ctx.db.base.delete({
+        where: { id: input.id },
+      });
     }),
 });

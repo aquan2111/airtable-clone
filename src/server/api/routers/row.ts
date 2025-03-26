@@ -6,24 +6,30 @@ export const rowRouter = createTRPCRouter({
     return await ctx.db.row.findMany({});
   }),
 
-  getRowsByTable: protectedProcedure.input(z.object({ tableId: z.string() })).query(async ({ ctx, input }) => {
-    return await ctx.db.row.findMany({
-      where: { tableId: input.tableId },
-    });
-  }),
+  getRowsByTable: protectedProcedure
+    .input(z.object({ tableId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      return await ctx.db.row.findMany({
+        where: { tableId: input.tableId },
+      });
+    }),
 
-  getRowById: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
-    return await ctx.db.row.findUnique({ where: { id: input.id } });
-  }),
+  getRowById: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .query(async ({ ctx, input }) => {
+      return await ctx.db.row.findUnique({ where: { id: input.id } });
+    }),
 
   createRow: protectedProcedure
-    .input(z.object({
-      tableId: z.string(),      
-    }))
+    .input(
+      z.object({
+        tableId: z.string(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       return await ctx.db.row.create({
         data: {
-          tableId: input.tableId, 
+          tableId: input.tableId,
         },
       });
     }),
@@ -34,6 +40,14 @@ export const rowRouter = createTRPCRouter({
       return await ctx.db.row.update({
         where: { id: input.id },
         data: input,
+      });
+    }),
+
+  deleteRow: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      return await ctx.db.row.delete({
+        where: { id: input.id },
       });
     }),
 });
