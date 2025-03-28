@@ -11,6 +11,7 @@ export const rowRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       return await ctx.db.row.findMany({
         where: { tableId: input.tableId },
+        include: { cells: true }, // Fetch row cells
       });
     }),
 
@@ -43,11 +44,12 @@ export const rowRouter = createTRPCRouter({
       });
     }),
 
-  deleteRow: protectedProcedure
+    deleteRow: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      return await ctx.db.row.delete({
-        where: { id: input.id },
-      });
+      // Delete associated cells first
+      await ctx.db.cell.deleteMany({ where: { rowId: input.id } });
+
+      return await ctx.db.row.delete({ where: { id: input.id } });
     }),
 });
