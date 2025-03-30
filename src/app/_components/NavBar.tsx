@@ -20,10 +20,6 @@ export default function Navbar() {
       <div className="relative flex items-center gap-4">
         {session ? (
           <>
-            {/* My Dashboard Link */}
-            <Link href="/dashboard" className="text-gray-700 hover:text-gray-900">
-              My Dashboard
-            </Link>
 
             {/* Profile Picture & Dropdown */}
             <div
