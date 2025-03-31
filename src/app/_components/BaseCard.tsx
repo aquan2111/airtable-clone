@@ -61,10 +61,10 @@ export default function BaseCard({ id, name, refetch }: BaseProps) {
           Open
         </Link>
         <div className="space-x-2">
-          <button onClick={() => setEditing(true)} className="text-gray-500" disabled={updateBase.isPending}>
+          <button onClick={() => setEditing(true)} className="text-gray-500 cursor-pointer disabled:cursor-not-allowed" disabled={updateBase.isPending}>
             ✏️
           </button>
-          <button onClick={handleDeleteBase} className="text-red-500" disabled={deleteBase.isPending}>
+          <button onClick={handleDeleteBase} className="text-red-500 cursor-pointer disabled:cursor-not-allowed" disabled={deleteBase.isPending}>
             🗑
           </button>
         </div>

@@ -30,6 +30,30 @@ export default function Home() {
     enabled: !!session, // Only run the query when session exists
   });
 
+  // Function to generate the next available base name
+  const getNextBaseName = () => {
+    if (!bases || bases.length === 0) return "Untitled Base 1";
+    
+    // Extract all bases with default naming pattern (Untitled Base 1, Untitled Base 2, etc.)
+    const defaultNamePattern = /^Untitled Base (\d+)$/;
+    const usedNumbers = new Set<number>();
+    
+    bases.forEach(base => {
+      const match = defaultNamePattern.exec(base.name);
+      if (match) {
+        usedNumbers.add(parseInt(match[1]!, 10));
+      }
+    });
+    
+    // Find the lowest available number
+    let nextNumber = 1;
+    while (usedNumbers.has(nextNumber)) {
+      nextNumber++;
+    }
+    
+    return `Untitled Base ${nextNumber}`;
+  };
+
   // Mutation to create a base
   const createBase = api.base.createBase.useMutation({
     onSuccess: (newBase) => {
@@ -39,7 +63,8 @@ export default function Home() {
   });
 
   const handleCreateBase = () => {
-    createBase.mutate({ name: "Untitled Base" });
+    const nextBaseName = getNextBaseName();
+    createBase.mutate({ name: nextBaseName });
   };
 
   // Render login page when user is not authenticated
@@ -65,7 +90,7 @@ export default function Home() {
         <h1 className="text-3xl font-bold">My Bases</h1>
         <button 
           onClick={handleCreateBase} 
-          className="rounded bg-blue-500 px-4 py-2 text-white"
+          className="rounded bg-blue-500 px-4 py-2 text-white cursor-pointer disabled:cursor-not-allowed"
           disabled={createBase.isPending}
         >
           Create Base

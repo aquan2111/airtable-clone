@@ -23,7 +23,7 @@ export default async function UserProfile() {
         </div>
       </div>
 
-      <h2 className="mt-6 text-2xl font-bold">Your Bases</h2>
+      {/* <h2 className="mt-6 text-2xl font-bold">Your Bases</h2> */}
       {/* Fetch and display bases here */}
     </main>
   );

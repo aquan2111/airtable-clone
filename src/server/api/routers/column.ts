@@ -20,7 +20,7 @@ export const columnRouter = createTRPCRouter({
       return await ctx.db.column.findUnique({ where: { id: input.id } });
     }),
 
-  createColumn: protectedProcedure
+    createColumn: protectedProcedure
     .input(
       z.object({
         name: z.string().min(1),
@@ -29,12 +29,31 @@ export const columnRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      return await ctx.db.column.create({
+      const newColumn = await ctx.db.column.create({
         data: {
           name: input.name,
           type: input.type,
           tableId: input.tableId,
         },
+      });
+
+      const rows = await ctx.db.row.findMany({
+        where: { tableId: input.tableId },
+      });
+
+      if (rows.length > 0) {
+        await ctx.db.cell.createMany({
+          data: rows.map(row => ({
+            rowId: row.id,
+            columnId: newColumn.id,
+            value: "", // Empty value
+          })),
+        });
+      }
+
+      return await ctx.db.column.findUnique({
+        where: { id: newColumn.id },
+        include: { cells: true },
       });
     }),
 

@@ -21,17 +21,36 @@ export const rowRouter = createTRPCRouter({
       return await ctx.db.row.findUnique({ where: { id: input.id } });
     }),
 
-  createRow: protectedProcedure
+    createRow: protectedProcedure
     .input(
       z.object({
         tableId: z.string(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      return await ctx.db.row.create({
+      const newRow = await ctx.db.row.create({
         data: {
           tableId: input.tableId,
         },
+      });
+
+      const columns = await ctx.db.column.findMany({
+        where: { tableId: input.tableId },
+      });
+
+      if (columns.length > 0) {
+        await ctx.db.cell.createMany({
+          data: columns.map(column => ({
+            rowId: newRow.id,
+            columnId: column.id,
+            value: "", // Empty value
+          })),
+        });
+      }
+
+      return await ctx.db.row.findUnique({
+        where: { id: newRow.id },
+        include: { cells: true },
       });
     }),
 
