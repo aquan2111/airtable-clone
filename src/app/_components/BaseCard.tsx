@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { api } from "~/trpc/react";
+import { Pencil, Trash2 } from 'lucide-react';
 
 interface BaseProps {
   id: string;
@@ -62,10 +63,10 @@ export default function BaseCard({ id, name, refetch }: BaseProps) {
         </Link>
         <div className="space-x-2">
           <button onClick={() => setEditing(true)} className="text-gray-500 cursor-pointer disabled:cursor-not-allowed" disabled={updateBase.isPending}>
-            ✏️
+            <Pencil size={16} />
           </button>
           <button onClick={handleDeleteBase} className="text-red-500 cursor-pointer disabled:cursor-not-allowed" disabled={deleteBase.isPending}>
-            🗑
+            <Trash2 size={16} />
           </button>
         </div>
       </div>
