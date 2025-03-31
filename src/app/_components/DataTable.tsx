@@ -1,14 +1,18 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Plus, Save, Trash2, X, Pencil } from "lucide-react";
+import { Plus, Save, Trash2, X, Pencil, Filter } from "lucide-react";
 import { api } from "~/trpc/react";
 import {
   createColumnHelper,
   flexRender,
   getCoreRowModel,
+  getFilteredRowModel,
+  getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
+
+import type { SortingState, ColumnFiltersState } from "@tanstack/react-table";
 
 // Define proper interfaces for your data structures
 interface Column {
@@ -57,6 +61,23 @@ interface EditableColumnHeaderProps {
   hasNonNumericValues: boolean;
 }
 
+// Define proper filter type
+type FilterType =
+  | "contains"
+  | "equals"
+  | "notEquals"
+  | "greaterThan"
+  | "lessThan";
+
+// Define filter record type that matches your backend schema
+type FilterRecord = Record<
+  string,
+  {
+    type: FilterType;
+    value: string;
+  }
+>;
+
 // Extracted editable column header component to prevent re-rendering issues
 function EditableColumnHeader({
   column,
@@ -86,28 +107,30 @@ function EditableColumnHeader({
             // Add key press handler for Enter and Escape
             onKeyDown={(e) => {
               e.stopPropagation();
-              if (e.key === 'Enter') {
+              if (e.key === "Enter") {
                 onSave();
-              } else if (e.key === 'Escape') {
+              } else if (e.key === "Escape") {
                 onCancel();
               }
             }}
           />
           <div className="flex items-center">
-            <select 
-              value={editType} 
+            <select
+              value={editType}
               onChange={(e) => onTypeChange(e.target.value)}
-              className="text-xs border p-1"
+              className="border p-1 text-xs"
               onClick={(e) => e.stopPropagation()}
             >
               <option value="TEXT">Text</option>
               <option value="NUMBER">Number</option>
             </select>
-            {column.type === "TEXT" && editType === "NUMBER" && hasNonNumericValues && (
-              <span className="ml-2 text-xs text-red-500">
-                ⚠️ Clear non-numeric values first
-              </span>
-            )}
+            {column.type === "TEXT" &&
+              editType === "NUMBER" &&
+              hasNonNumericValues && (
+                <span className="ml-2 text-xs text-red-500">
+                  ⚠️ Clear non-numeric values first
+                </span>
+              )}
           </div>
         </div>
       ) : (
@@ -128,7 +151,11 @@ function EditableColumnHeader({
                 onSave();
               }}
               className="cursor-pointer text-green-500"
-              disabled={column.type === "TEXT" && editType === "NUMBER" && hasNonNumericValues}
+              disabled={
+                column.type === "TEXT" &&
+                editType === "NUMBER" &&
+                hasNonNumericValues
+              }
             >
               <Save size={16} />
             </button>
@@ -181,16 +208,16 @@ interface EditableCellProps {
 }
 
 // Extracted editable cell component
-function EditableCell({ 
-  value, 
-  isEditing, 
-  editValue, 
-  onChange, 
-  onSave, 
-  onCancel, 
+function EditableCell({
+  value,
+  isEditing,
+  editValue,
+  onChange,
+  onSave,
+  onCancel,
   onStartEdit,
   isNumberType,
-  validationError 
+  validationError,
 }: EditableCellProps): React.ReactNode {
   if (isEditing) {
     return (
@@ -199,14 +226,14 @@ function EditableCell({
           <input
             value={editValue}
             onChange={(e) => onChange(e.target.value)}
-            className={`w-full border p-1 ${validationError ? 'border-red-500' : ''}`}
+            className={`w-full border p-1 ${validationError ? "border-red-500" : ""}`}
             autoFocus
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               e.stopPropagation();
-              if (e.key === 'Enter' && !validationError) {
+              if (e.key === "Enter" && !validationError) {
                 onSave();
-              } else if (e.key === 'Escape') {
+              } else if (e.key === "Escape") {
                 onCancel();
               }
             }}
@@ -216,7 +243,7 @@ function EditableCell({
               e.stopPropagation();
               if (!validationError) onSave();
             }}
-            className={`ml-2 cursor-pointer ${validationError ? 'text-gray-400' : 'text-green-500'}`}
+            className={`ml-2 cursor-pointer ${validationError ? "text-gray-400" : "text-green-500"}`}
             disabled={!!validationError}
           >
             <Save size={16} />
@@ -232,7 +259,7 @@ function EditableCell({
           </button>
         </div>
         {validationError && (
-          <div className="text-xs text-red-500 mt-1">{validationError}</div>
+          <div className="mt-1 text-xs text-red-500">{validationError}</div>
         )}
       </div>
     );
@@ -248,7 +275,9 @@ function EditableCell({
   );
 }
 
-export default function DataTable({ tableId }: DataTableProps): React.ReactNode {
+export default function DataTable({
+  tableId,
+}: DataTableProps): React.ReactNode {
   const { data: table, refetch } = api.table.getTableById.useQuery({
     id: tableId,
   });
@@ -268,6 +297,17 @@ export default function DataTable({ tableId }: DataTableProps): React.ReactNode 
     name: string;
     type: string;
   } | null>(null);
+  const [sorting, setSorting] = useState<SortingState>([]);
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const [globalFilter, setGlobalFilter] = useState<string>("");
+  const [showFilterInput, setShowFilterInput] = useState<boolean>(false);
+  const [filterColumn, setFilterColumn] = useState<string>("");
+  const [filterComparison, setFilterComparison] = useState<string>("contains");
+  const [filterValue, setFilterValue] = useState<string>("");
+  const [activeFilters, setActiveFilters] = useState<
+    { id: string; comparison: FilterType; value: string }[]
+  >([]);
+  const [currentViewId, setCurrentViewId] = useState<string | null>(null);
 
   // Mutations
   const createColumnMutation = api.column.createColumn.useMutation({
@@ -311,45 +351,68 @@ export default function DataTable({ tableId }: DataTableProps): React.ReactNode 
     },
   });
 
+  const createViewMutation = api.view.createView.useMutation({
+    onSuccess: () => void refetch(),
+  });
+
+  const updateViewMutation = api.view.updateView.useMutation({
+    onSuccess: () => void refetch(),
+  });
+
   // Validate if a column can be changed to number type
-  const canConvertToNumberType = useCallback((columnId: string): boolean => {
-    if (!table) return true;
-    
-    // Check if all cells in the column contain valid numbers or are empty
-    const hasNonNumericValue = table.rows.some(row => {
-      const cell = row.cells.find(cell => cell.columnId === columnId);
-      if (!cell || cell.value === "") return false;
-      return isNaN(Number(cell.value));
-    });
-    
-    return !hasNonNumericValue;
-  }, [table]);
+  const canConvertToNumberType = useCallback(
+    (columnId: string): boolean => {
+      if (!table) return true;
+
+      // Check if all cells in the column contain valid numbers or are empty
+      const hasNonNumericValue = table.rows.some((row) => {
+        const cell = row.cells.find((cell) => cell.columnId === columnId);
+        if (!cell || cell.value === "") return false;
+        return isNaN(Number(cell.value));
+      });
+
+      return !hasNonNumericValue;
+    },
+    [table],
+  );
 
   // Validate cell value based on column type
-  const validateCellValue = useCallback((value: string, columnType: string): string | null => {
-    if (columnType === "NUMBER" && value !== "") {
-      if (isNaN(Number(value))) {
-        return "Please enter a valid number";
+  const validateCellValue = useCallback(
+    (value: string, columnType: string): string | null => {
+      if (columnType === "NUMBER" && value !== "") {
+        if (isNaN(Number(value))) {
+          return "Please enter a valid number";
+        }
       }
-    }
-    return null;
-  }, []);
+      return null;
+    },
+    [],
+  );
 
   // Handle cell value change with validation
-  const handleCellValueChange = useCallback((value: string) => {
-    if (!editingCell || !table) return;
-    
-    const column = table.columns.find(col => col.id === editingCell.columnId);
-    if (!column) return;
-    
-    const validationError = validateCellValue(value, column.type);
-    
-    setEditingCell(prev => prev ? { 
-      ...prev, 
-      value,
-      validationError 
-    } : null);
-  }, [editingCell, table, validateCellValue]);
+  const handleCellValueChange = useCallback(
+    (value: string) => {
+      if (!editingCell || !table) return;
+
+      const column = table.columns.find(
+        (col) => col.id === editingCell.columnId,
+      );
+      if (!column) return;
+
+      const validationError = validateCellValue(value, column.type);
+
+      setEditingCell((prev) =>
+        prev
+          ? {
+              ...prev,
+              value,
+              validationError,
+            }
+          : null,
+      );
+    },
+    [editingCell, table, validateCellValue],
+  );
 
   // Memoized handlers
   const handleCreateColumn = useCallback(() => {
@@ -419,7 +482,126 @@ export default function DataTable({ tableId }: DataTableProps): React.ReactNode 
         type: newType,
       });
     },
-    [updateColumnMutation]
+    [updateColumnMutation],
+  );
+
+  // Handle filter application with proper typing
+  const handleApplyFilter = useCallback(() => {
+    if (filterColumn && filterValue) {
+      // Create the filter object that matches your API schema
+      const newFilter = {
+        type: filterComparison as FilterType,
+        value: filterValue,
+      };
+
+      // Apply the filter to table state
+      setColumnFilters((prev) => {
+        const filtered = prev.filter((filter) => filter.id !== filterColumn);
+
+        // Custom filter function that will work with TanStack Table
+        const filterFn = (value: unknown) => {
+          if (!value) return false;
+
+          let strValue = "";
+
+          // Handle object values gracefully
+          if (typeof value === "object" && value !== null) {
+            strValue = (value as { name?: string }).name?.toLowerCase() ?? "";
+          }
+
+          const strFilterVal = filterValue.toLowerCase();
+
+          switch (filterComparison) {
+            case "equals":
+              return strValue === strFilterVal;
+            case "notEquals":
+              return strValue !== strFilterVal;
+            case "greaterThan":
+              return Number(value) > Number(filterValue);
+            case "lessThan":
+              return Number(value) < Number(filterValue);
+            case "contains":
+            default:
+              return strValue.includes(strFilterVal);
+          }
+        };
+
+        return [...filtered, { id: filterColumn, value: filterFn }];
+      });
+
+      // Add to active filters for display
+      setActiveFilters((prev) => [
+        ...prev,
+        {
+          id: filterColumn,
+          comparison: filterComparison as FilterType,
+          value: filterValue,
+        },
+      ]);
+
+      // Reset form
+      setFilterValue("");
+      setShowFilterInput(false);
+    }
+  }, [filterColumn, filterComparison, filterValue]);
+
+  const saveFilterAsView = useCallback(
+    async (viewName: string) => {
+      if (tableId && activeFilters.length > 0) {
+        // Convert activeFilters to the format expected by your API
+        const filterObject: Record<
+          string,
+          {
+            type: FilterType;
+            value: string;
+          }
+        > = {};
+
+        activeFilters.forEach((filter) => {
+          // Map frontend comparison types to backend types if needed
+          const apiFilterType = filter.comparison;
+
+          filterObject[filter.id] = {
+            type: apiFilterType,
+            value: filter.value,
+          };
+        });
+
+        try {
+          // If updating an existing view
+          if (currentViewId) {
+            await updateViewMutation.mutateAsync({
+              id: currentViewId,
+              filters: filterObject,
+            });
+          }
+          // If creating a new view
+          else {
+            // You'll need to get the current user ID from your auth context
+            const userId = "current-user-id"; // Replace with actual user ID
+
+            await createViewMutation.mutateAsync({
+              name: viewName,
+              tableId: tableId,
+              createdBy: userId,
+            });
+          }
+
+          // Optionally show success message
+          alert("View saved successfully!");
+        } catch (error) {
+          console.error("Failed to save view:", error);
+          alert("Failed to save view");
+        }
+      }
+    },
+    [
+      tableId,
+      activeFilters,
+      currentViewId,
+      updateViewMutation,
+      createViewMutation,
+    ],
   );
 
   // TanStack Table Setup
@@ -437,43 +619,70 @@ export default function DataTable({ tableId }: DataTableProps): React.ReactNode 
         },
         {
           id: col.id,
-          header: () => {
-            const hasNonNumericValues = !canConvertToNumberType(col.id);
-            
-            return (
-              <EditableColumnHeader
-                column={col}
-                isEditing={editingColumn?.id === col.id}
-                editValue={editingColumn?.id === col.id ? editingColumn.name : ""}
-                editType={editingColumn?.id === col.id ? editingColumn.type : col.type}
-                onEditChange={(value: string) => 
-                  setEditingColumn(prev => prev ? { ...prev, name: value } : null)
-                }
-                onTypeChange={(type: string) => 
-                  setEditingColumn(prev => prev ? { ...prev, type } : null)
-                }
-                onSave={() => {
-                  if (editingColumn) {
-                    // Only allow changing to NUMBER if all values are valid numbers or empty
-                    if (col.type === "TEXT" && editingColumn.type === "NUMBER" && hasNonNumericValues) {
-                      return; // Prevent saving if invalid conversion
-                    }
-                    handleUpdateColumn(col.id, editingColumn.name, editingColumn.type);
+          // Update the header part in generateColumns function
+          // Update the header part in generateColumns function
+          header: ({ column }) => (
+            <div className="flex flex-col">
+              <div className="flex items-center justify-between">
+                <EditableColumnHeader
+                  column={col}
+                  isEditing={editingColumn?.id === col.id}
+                  editValue={
+                    editingColumn?.id === col.id ? editingColumn.name : ""
                   }
-                }}
-                onCancel={() => setEditingColumn(null)}
-                onStartEdit={() => 
-                  setEditingColumn({
-                    id: col.id,
-                    name: col.name,
-                    type: col.type,
-                  })
-                }
-                onDelete={() => deleteColumnMutation.mutate({ id: col.id })}
-                hasNonNumericValues={hasNonNumericValues}
-              />
-            );
-          },
+                  editType={
+                    editingColumn?.id === col.id ? editingColumn.type : col.type
+                  }
+                  onEditChange={(value) =>
+                    setEditingColumn((prev) =>
+                      prev ? { ...prev, name: value } : null,
+                    )
+                  }
+                  onTypeChange={(type) =>
+                    setEditingColumn((prev) =>
+                      prev ? { ...prev, type } : null,
+                    )
+                  }
+                  onSave={() => {
+                    if (editingColumn) {
+                      handleUpdateColumn(
+                        col.id,
+                        editingColumn.name,
+                        editingColumn.type,
+                      );
+                    }
+                  }}
+                  onCancel={() => setEditingColumn(null)}
+                  onStartEdit={() =>
+                    setEditingColumn({
+                      id: col.id,
+                      name: col.name,
+                      type: col.type,
+                    })
+                  }
+                  onDelete={() => deleteColumnMutation.mutate({ id: col.id })}
+                  hasNonNumericValues={!canConvertToNumberType(col.id)}
+                />
+
+                {/* Prominent Sort Button */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    column.toggleSorting();
+                  }}
+                  className="ml-2 flex h-7 w-7 items-center justify-center rounded-full bg-gray-200 hover:bg-gray-300"
+                  title="Toggle sort"
+                >
+                  {column.getIsSorted() === "asc"
+                    ? "🔼"
+                    : column.getIsSorted() === "desc"
+                      ? "🔽"
+                      : "⇅"}
+                </button>
+              </div>
+            </div>
+          ),
+
           cell: ({ row, column }) => {
             const rowId = row.original.id;
             const columnId = column.id;
@@ -481,13 +690,13 @@ export default function DataTable({ tableId }: DataTableProps): React.ReactNode 
               (c: Cell) => c.columnId === columnId,
             );
             const cellValue = cell?.value ?? "";
-            const isEditing = 
-              editingCell?.rowId === rowId && 
+            const isEditing =
+              editingCell?.rowId === rowId &&
               editingCell?.columnId === columnId;
-            
-            const columnDef = table.columns.find(c => c.id === columnId);
+
+            const columnDef = table.columns.find((c) => c.id === columnId);
             const isNumberType = columnDef?.type === "NUMBER";
-            
+
             return (
               <EditableCell
                 value={cellValue}
@@ -497,9 +706,14 @@ export default function DataTable({ tableId }: DataTableProps): React.ReactNode 
                 onSave={handleUpdateCell}
                 onCancel={() => setEditingCell(null)}
                 onStartEdit={() => {
-                  const columnType = table.columns.find(c => c.id === columnId)?.type ?? "TEXT";
-                  const validationError = validateCellValue(cellValue, columnType);
-                  
+                  const columnType =
+                    table.columns.find((c) => c.id === columnId)?.type ??
+                    "TEXT";
+                  const validationError = validateCellValue(
+                    cellValue,
+                    columnType,
+                  );
+
                   setEditingCell({
                     rowId,
                     columnId,
@@ -537,17 +751,17 @@ export default function DataTable({ tableId }: DataTableProps): React.ReactNode 
       }),
     ];
   }, [
-    table, 
-    columnHelper, 
-    editingColumn, 
-    editingCell, 
-    deleteColumnMutation, 
-    handleUpdateCell, 
+    table,
+    columnHelper,
+    editingColumn,
+    editingCell,
+    deleteColumnMutation,
+    handleUpdateCell,
     handleUpdateColumn,
     deleteRowMutation,
     canConvertToNumberType,
     validateCellValue,
-    handleCellValueChange
+    handleCellValueChange,
   ]);
 
   const columns = generateColumns();
@@ -557,11 +771,23 @@ export default function DataTable({ tableId }: DataTableProps): React.ReactNode 
     data,
     columns,
     getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    state: {
+      sorting,
+      columnFilters,
+      globalFilter,
+    },
+    onSortingChange: setSorting,
+    onColumnFiltersChange: setColumnFilters,
+    onGlobalFilterChange: setGlobalFilter,
   });
 
   if (!table) {
     return <div className="p-4 text-center">Loading table data...</div>;
   }
+
+  console.log("Columns:", columns);
 
   return (
     <div className="p-4">
@@ -585,6 +811,211 @@ export default function DataTable({ tableId }: DataTableProps): React.ReactNode 
           />{" "}
           Add Row
         </button>
+
+        {/* Add filter button */}
+        {/* <button
+          className="flex cursor-pointer items-center rounded bg-purple-500 px-3 py-2 text-white"
+          onClick={() => setShowFilterInput((prev) => !prev)}
+        >
+          <Filter size={16} className="mr-1" /> Add Filter
+        </button> */}
+      </div>
+
+      {/* In-place filter inputs */}
+      {/* {showFilterInput && (
+        <div className="mb-4 rounded-md border bg-gray-50 p-3">
+          <div className="flex flex-wrap items-end gap-4">
+            <div>
+              <label className="mb-1 block text-sm">Column</label>
+              <select
+                value={filterColumn}
+                onChange={(e) => setFilterColumn(e.target.value)}
+                className="min-w-[150px] rounded border p-2"
+              >
+                <option value="">Select column</option>
+                {columns
+                  .filter((col) => col.id !== "actions") 
+                  .map((col) => (
+                    <option key={col.id} value={col.id}>
+                      {typeof col.header === "string" ? col.header : col.id}
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm">Comparison</label>
+              <select
+                value={filterComparison}
+                onChange={(e) => setFilterComparison(e.target.value)}
+                className="min-w-[150px] rounded border p-2"
+              >
+                <option value="contains">Contains</option>
+                <option value="equals">Equals</option>
+                <option value="notEquals">Not Equals</option>
+                <option value="greaterThan">Greater Than</option>
+                <option value="lessThan">Less Than</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm">Value</label>
+              <input
+                type="text"
+                value={filterValue}
+                onChange={(e) => setFilterValue(e.target.value)}
+                className="min-w-[150px] rounded border p-2"
+                placeholder="Filter value..."
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={handleApplyFilter}
+                disabled={!filterColumn || !filterValue}
+                className="flex items-center rounded bg-blue-500 px-3 py-2 text-white disabled:bg-blue-300"
+              >
+                Apply
+              </button>
+              <button
+                onClick={() => {
+                  setFilterColumn("");
+                  setFilterValue("");
+                  setShowFilterInput(false);
+                }}
+                className="rounded border px-3 py-2"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )} */}
+
+      {/* Active filters display */}
+      {/* {activeFilters.length > 0 && (
+        <div className="mb-4">
+          <p className="mb-2 text-sm font-medium">Active Filters:</p>
+          <div className="flex flex-wrap gap-2">
+            {activeFilters.map((filter, index) => {
+              const column = table.columns.find((col) => col.id === filter.id);
+              const comparisonLabel = {
+                contains: "contains",
+                equals: "=",
+                notEquals: "≠",
+                greaterThan: ">",
+                lessThan: "<",
+              }[filter.comparison];
+
+              return (
+                <div
+                  key={index}
+                  className="flex items-center rounded-full bg-blue-100 px-3 py-1.5 text-sm text-blue-800"
+                >
+                  {column?.name} {comparisonLabel} {filter.value}
+                  <button
+                    onClick={() => {
+                      setColumnFilters((prev) =>
+                        prev.filter((_, i) => i !== index),
+                      );
+                      setActiveFilters((prev) =>
+                        prev.filter((_, i) => i !== index),
+                      );
+                    }}
+                    className="ml-2 text-blue-600 hover:text-blue-800"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              );
+            })}
+
+            <button
+              onClick={() => {
+                setColumnFilters([]);
+                setActiveFilters([]);
+              }}
+              className="text-xs text-red-600 underline hover:text-red-800"
+            >
+              Clear All
+            </button>
+          </div>
+        </div>
+      )} */}
+
+      {/* Add this near your active filters display */}
+      {/* {activeFilters.length > 0 && ( */}
+        {/* <div className="mb-4"> */}
+          {/* <div className="mb-2 flex items-center justify-between"> */}
+            {/* <p className="text-sm font-medium">Active Filters:</p> */}
+
+            {/* <button */}
+              {/* onClick={() => { */}
+                {/* const viewName = prompt("Enter a name for this view:"); */}
+                {/* if (viewName) { */}
+                  {/* void saveFilterAsView(viewName); */}
+                {/* } */}
+              {/* }} */}
+              {/* className="rounded bg-blue-500 px-3 py-1 text-sm text-white hover:bg-blue-600" */}
+            {/* > */}
+              {/* Save as View */}
+            {/* </button> */}
+          {/* </div> */}
+
+          {/* <div className="flex flex-wrap gap-2">{}</div> */}
+        {/* </div> */}
+      {/* )} */}
+
+      {/* <input
+        type="text"
+        value={globalFilter}
+        onChange={(e) => setGlobalFilter(e.target.value)}
+        placeholder="Search..."
+        className="w-64 rounded border p-2"
+        onClick={(e) => e.stopPropagation()} // Prevent table re-renders
+      /> */}
+
+      {/* Global search */}
+      <div className="mb-4 flex items-center">
+        <input
+          type="text"
+          value={globalFilter}
+          onChange={(e) => setGlobalFilter(e.target.value)}
+          placeholder="Search..."
+          className="mr-4 w-64 rounded border p-2"
+          onClick={(e) => e.stopPropagation()}
+        />
+
+        {/* Active filters display */}
+        {/* <div className="flex flex-wrap gap-2">
+          {activeFilters.map((filter, index) => {
+            const column = table.columns.find((col) => col.id === filter.id);
+            return (
+              <div
+                key={index}
+                className="flex items-center rounded bg-blue-100 px-2 py-1 text-sm text-blue-800"
+              >
+                {column?.name}: {filter.value}
+                <button
+                  onClick={() => {
+                    setColumnFilters((prev) =>
+                      prev.filter(
+                        (f) =>
+                          !(f.id === filter.id && f.value === filter.value),
+                      ),
+                    );
+                    setActiveFilters((prev) =>
+                      prev.filter((_, i) => i !== index),
+                    );
+                  }}
+                  className="ml-1 text-blue-600 hover:text-blue-800"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            );
+          })}
+        </div> */}
       </div>
 
       {/* TanStack Table */}
@@ -594,13 +1025,17 @@ export default function DataTable({ tableId }: DataTableProps): React.ReactNode 
             {tableInstance.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id} className="bg-gray-200">
                 {headerGroup.headers.map((header) => (
-                  <th key={header.id} className="border p-2 text-left">
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(
-                          header.column.columnDef.header,
-                          header.getContext(),
-                        )}
+                  <th
+                    key={header.id}
+                    className="cursor-pointer border p-2 text-left"
+                    onClick={() => header.column.toggleSorting()}
+                  >
+                    {flexRender(
+                      header.column.columnDef.header,
+                      header.getContext(),
+                    )}
+                    {/* {header.column.getIsSorted() === "asc" && " 🔼"}
+                    {header.column.getIsSorted() === "desc" && " 🔽"} */}
                   </th>
                 ))}
               </tr>

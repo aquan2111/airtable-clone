@@ -4,6 +4,7 @@ import { tableRouter } from "~/server/api/routers/table";
 import { columnRouter } from "~/server/api/routers/column";
 import { rowRouter } from "~/server/api/routers/row";
 import { cellRouter } from "~/server/api/routers/cell";
+import { viewRouter } from "~/server/api/routers/view";
 import { createCallerFactory, createTRPCRouter } from "~/server/api/trpc";
 
 /**
@@ -18,6 +19,7 @@ export const appRouter = createTRPCRouter({
   column: columnRouter,
   row: rowRouter,
   cell: cellRouter,
+  view: viewRouter,
 });
 
 // export type definition of API

@@ -16,17 +16,17 @@ export const tableRouter = createTRPCRouter({
           columns: true,
           rows: {
             include: {
-              cells: true, 
+              cells: true,
             },
           },
         },
       });
     }),
 
-    getTableById: protectedProcedure
+  getTableById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      return await ctx.db.table.findUnique({ 
+      return await ctx.db.table.findUnique({
         where: { id: input.id },
         include: {
           columns: true,
@@ -39,7 +39,7 @@ export const tableRouter = createTRPCRouter({
       });
     }),
 
-    createTable: protectedProcedure
+  createTable: protectedProcedure
     .input(
       z.object({
         name: z.string().min(1),
@@ -63,7 +63,9 @@ export const tableRouter = createTRPCRouter({
       });
 
       // Fetch created columns to map their IDs
-      const createdColumns = await ctx.db.column.findMany({ where: { tableId: table.id } });
+      const createdColumns = await ctx.db.column.findMany({
+        where: { tableId: table.id },
+      });
 
       // Create 5 default rows with random data
       const rows = await ctx.db.row.createMany({
@@ -71,7 +73,9 @@ export const tableRouter = createTRPCRouter({
       });
 
       // Fetch created rows
-      const createdRows = await ctx.db.row.findMany({ where: { tableId: table.id } });
+      const createdRows = await ctx.db.row.findMany({
+        where: { tableId: table.id },
+      });
 
       // Generate fake data for each row and column
       const cellData = [];
@@ -82,7 +86,7 @@ export const tableRouter = createTRPCRouter({
             fakeValue = faker.person.fullName();
           } else if (column.name === "Age") {
             fakeValue = faker.number.int({ min: 18, max: 60 }).toString();
-          } 
+          }
 
           cellData.push({
             rowId: row.id,
@@ -107,7 +111,7 @@ export const tableRouter = createTRPCRouter({
       });
     }),
 
-    deleteTable: protectedProcedure
+  deleteTable: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       // Delete related rows, columns, and cells before deleting the table
@@ -118,5 +122,134 @@ export const tableRouter = createTRPCRouter({
       return await ctx.db.table.delete({
         where: { id: input.id },
       });
+    }),
+
+  getFilteredSortedRows: protectedProcedure
+    .input(
+      z.object({
+        tableId: z.string(),
+        search: z.string().optional(),
+        filters: z
+          .record(
+            z.object({
+              type: z.enum([
+                "contains",
+                "not_contains",
+                "equals",
+                "is_empty",
+                "is_not_empty",
+                "greater_than",
+                "less_than",
+              ]),
+              value: z.string().optional(),
+            }),
+          )
+          .optional(),
+        sortOrder: z.record(z.enum(["asc", "desc"])).optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const { tableId, search, filters, sortOrder } = input;
+
+      // Fetch all rows, but filter and sort at the database level where possible
+      return await ctx.db.row
+        .findMany({
+          where: {
+            tableId,
+            AND: [
+              search
+                ? {
+                    cells: {
+                      some: {
+                        value: {
+                          contains: search,
+                          mode: "insensitive",
+                        },
+                      },
+                    },
+                  }
+                : {},
+              filters
+                ? {
+                    cells: {
+                      some: {
+                        OR: Object.entries(filters).map(
+                          ([columnId, filter]) => {
+                            if (!filter.value) return {};
+                            switch (filter.type) {
+                              case "contains":
+                                return {
+                                  columnId,
+                                  value: {
+                                    contains: filter.value,
+                                    mode: "insensitive",
+                                  },
+                                };
+                              case "not_contains":
+                                return {
+                                  columnId,
+                                  value: {
+                                    not: {
+                                      contains: filter.value,
+                                      mode: "insensitive",
+                                    },
+                                  },
+                                };
+                              case "equals":
+                                return { columnId, value: filter.value };
+                              case "is_empty":
+                                return { columnId, value: "" };
+                              case "is_not_empty":
+                                return { columnId, NOT: { value: "" } };
+                              case "greater_than":
+                                return {
+                                  columnId,
+                                  value: { gt: filter.value },
+                                };
+                              case "less_than":
+                                return {
+                                  columnId,
+                                  value: { lt: filter.value },
+                                };
+                              default:
+                                return {};
+                            }
+                          },
+                        ),
+                      },
+                    },
+                  }
+                : {},
+            ],
+          },
+          include: {
+            cells: true, // Ensure cells are included for sorting
+          },
+        })
+        .then((rows) => {
+          // Apply sorting in JavaScript (since Prisma can't sort by nested fields)
+          if (sortOrder) {
+            rows.sort((a, b) => {
+              for (const [columnId, direction] of Object.entries(sortOrder)) {
+                const cellA =
+                  a.cells.find((c) => c.columnId === columnId)?.value ?? "";
+                const cellB =
+                  b.cells.find((c) => c.columnId === columnId)?.value ?? "";
+
+                if (!isNaN(Number(cellA)) && !isNaN(Number(cellB))) {
+                  return direction === "asc"
+                    ? Number(cellA) - Number(cellB)
+                    : Number(cellB) - Number(cellA);
+                } else {
+                  return direction === "asc"
+                    ? cellA.localeCompare(cellB)
+                    : cellB.localeCompare(cellA);
+                }
+              }
+              return 0;
+            });
+          }
+          return rows;
+        });
     }),
 });
