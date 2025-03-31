@@ -20,7 +20,7 @@ export const columnRouter = createTRPCRouter({
       return await ctx.db.column.findUnique({ where: { id: input.id } });
     }),
 
-    createColumn: protectedProcedure
+  createColumn: protectedProcedure
     .input(
       z.object({
         name: z.string().min(1),
@@ -66,6 +66,30 @@ export const columnRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      // If type is being changed to NUMBER, verify all existing values are valid
+      if (input.type === "NUMBER") {
+        const existingColumn = await ctx.db.column.findUnique({
+          where: { id: input.id },
+          include: { cells: true },
+        });
+
+        if (existingColumn && existingColumn.type !== "NUMBER") {
+          // Check all cells in this column
+          const cells = await ctx.db.cell.findMany({
+            where: { columnId: input.id },
+          });
+
+          // Verify all values are valid numbers or empty
+          const hasInvalidValue = cells.some(cell => {
+            return cell.value !== "" && isNaN(Number(cell.value));
+          });
+
+          if (hasInvalidValue) {
+            throw new Error("Cannot convert to NUMBER type: Column contains non-numeric values");
+          }
+        }
+      }
+
       return await ctx.db.column.update({
         where: { id: input.id },
         data: input,

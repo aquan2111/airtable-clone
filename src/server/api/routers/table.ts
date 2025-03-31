@@ -57,8 +57,8 @@ export const tableRouter = createTRPCRouter({
       // Create default columns
       const columns = await ctx.db.column.createMany({
         data: [
-          { name: "Name", type: "Text", tableId: table.id },
-          { name: "Age", type: "Number", tableId: table.id },
+          { name: "Name", type: "TEXT", tableId: table.id },
+          { name: "Age", type: "NUMBER", tableId: table.id },
         ],
       });
 
