@@ -54,7 +54,7 @@ export default function FilterMenu({ tableId, onClose }: FilterMenuProps) {
   };
 
   const handleRemoveFilter = (filterId: string) => {
-    removeFilter.mutate({ id: filterId, comparisonValue: "", isActive: false });
+    removeFilter.mutate({ id: filterId, isActive: false });
   };
 
   return (
