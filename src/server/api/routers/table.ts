@@ -19,6 +19,8 @@ export const tableRouter = createTRPCRouter({
               cells: true,
             },
           },
+          views: true,
+          activeView: true,
         },
       });
     }),
@@ -35,6 +37,8 @@ export const tableRouter = createTRPCRouter({
               cells: true,
             },
           },
+          views: true,
+          activeView: true,
         },
       });
     }),
@@ -96,14 +100,70 @@ export const tableRouter = createTRPCRouter({
         }
       }
 
+      // Create default view
+      const defaultView = await ctx.db.view.create({
+        data: {
+          name: "Default View",
+          isDefault: true,
+          tableId: table.id,
+        },
+      });
+
+      // Update the table to set the default view as active
+      await ctx.db.table.update({
+        where: { id: table.id },
+        data: {
+          activeViewId: defaultView.id,
+        },
+      });
+
       // Insert fake data into the cells
       await ctx.db.cell.createMany({ data: cellData });
 
-      return table;
+      return {
+        ...table,
+        defaultView,
+      };
+    }),
+
+  setActiveView: protectedProcedure
+    .input(
+      z.object({
+        tableId: z.string(),
+        viewId: z.string(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      // First verify the view exists and belongs to this table
+      const view = await ctx.db.view.findFirst({
+        where: {
+          id: input.viewId,
+          tableId: input.tableId,
+        },
+      });
+
+      if (!view) {
+        throw new Error("View not found or does not belong to this table");
+      }
+
+      // Update the table with the new active view
+      return await ctx.db.table.update({
+        where: { id: input.tableId },
+        data: { activeViewId: input.viewId },
+        include: {
+          activeView: true,
+        },
+      });
     }),
 
   updateTable: protectedProcedure
-    .input(z.object({ id: z.string(), name: z.string().optional() }))
+    .input(
+      z.object({
+        id: z.string(),
+        name: z.string().optional(),
+        activeViewId: z.string().optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       return await ctx.db.table.update({
         where: { id: input.id },
@@ -114,142 +174,8 @@ export const tableRouter = createTRPCRouter({
   deleteTable: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      // Delete related rows, columns, and cells before deleting the table
-      await ctx.db.cell.deleteMany({ where: { row: { tableId: input.id } } });
-      await ctx.db.row.deleteMany({ where: { tableId: input.id } });
-      await ctx.db.column.deleteMany({ where: { tableId: input.id } });
-
       return await ctx.db.table.delete({
         where: { id: input.id },
       });
-    }),
-
-  getFilteredSortedRows: protectedProcedure
-    .input(
-      z.object({
-        tableId: z.string(),
-        search: z.string().optional(),
-        filters: z
-          .record(
-            z.object({
-              type: z.enum([
-                "contains",
-                "not_contains",
-                "equals",
-                "is_empty",
-                "is_not_empty",
-                "greater_than",
-                "less_than",
-              ]),
-              value: z.string().optional(),
-            }),
-          )
-          .optional(),
-        sortOrder: z.record(z.enum(["asc", "desc"])).optional(),
-      }),
-    )
-    .query(async ({ ctx, input }) => {
-      const { tableId, search, filters, sortOrder } = input;
-
-      // Fetch all rows, but filter and sort at the database level where possible
-      return await ctx.db.row
-        .findMany({
-          where: {
-            tableId,
-            AND: [
-              search
-                ? {
-                    cells: {
-                      some: {
-                        value: {
-                          contains: search,
-                          mode: "insensitive",
-                        },
-                      },
-                    },
-                  }
-                : {},
-              filters
-                ? {
-                    cells: {
-                      some: {
-                        OR: Object.entries(filters).map(
-                          ([columnId, filter]) => {
-                            if (!filter.value) return {};
-                            switch (filter.type) {
-                              case "contains":
-                                return {
-                                  columnId,
-                                  value: {
-                                    contains: filter.value,
-                                    mode: "insensitive",
-                                  },
-                                };
-                              case "not_contains":
-                                return {
-                                  columnId,
-                                  value: {
-                                    not: {
-                                      contains: filter.value,
-                                      mode: "insensitive",
-                                    },
-                                  },
-                                };
-                              case "equals":
-                                return { columnId, value: filter.value };
-                              case "is_empty":
-                                return { columnId, value: "" };
-                              case "is_not_empty":
-                                return { columnId, NOT: { value: "" } };
-                              case "greater_than":
-                                return {
-                                  columnId,
-                                  value: { gt: filter.value },
-                                };
-                              case "less_than":
-                                return {
-                                  columnId,
-                                  value: { lt: filter.value },
-                                };
-                              default:
-                                return {};
-                            }
-                          },
-                        ),
-                      },
-                    },
-                  }
-                : {},
-            ],
-          },
-          include: {
-            cells: true, // Ensure cells are included for sorting
-          },
-        })
-        .then((rows) => {
-          // Apply sorting in JavaScript (since Prisma can't sort by nested fields)
-          if (sortOrder) {
-            rows.sort((a, b) => {
-              for (const [columnId, direction] of Object.entries(sortOrder)) {
-                const cellA =
-                  a.cells.find((c) => c.columnId === columnId)?.value ?? "";
-                const cellB =
-                  b.cells.find((c) => c.columnId === columnId)?.value ?? "";
-
-                if (!isNaN(Number(cellA)) && !isNaN(Number(cellB))) {
-                  return direction === "asc"
-                    ? Number(cellA) - Number(cellB)
-                    : Number(cellB) - Number(cellA);
-                } else {
-                  return direction === "asc"
-                    ? cellA.localeCompare(cellB)
-                    : cellB.localeCompare(cellA);
-                }
-              }
-              return 0;
-            });
-          }
-          return rows;
-        });
     }),
 });

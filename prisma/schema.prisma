@@ -1,119 +1,209 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
-    provider = "prisma-client-js"
+  provider = "prisma-client-js"
 }
 
 datasource db {
-    provider = "postgresql"
-    // NOTE: When using mysql or sqlserver, uncomment the @db.Text annotations in model Account below
-    // Further reading:
-    // https://next-auth.js.org/adapters/prisma#create-the-prisma-schema
-    // https://www.prisma.io/docs/reference/api-reference/prisma-schema-reference#string
-    url      = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
-// Necessary for Next auth
 model Account {
-    id                       String  @id @default(cuid())
-    userId                   String
-    type                     String
-    provider                 String
-    providerAccountId        String
-    refresh_token            String? // @db.Text
-    access_token             String? // @db.Text
-    expires_at               Int?
-    token_type               String?
-    scope                    String?
-    id_token                 String? // @db.Text
-    session_state            String?
-    user                     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-    refresh_token_expires_in Int?
+  id                       String  @id @default(cuid())
+  userId                   String
+  type                     String
+  provider                 String
+  providerAccountId        String
+  refresh_token            String?
+  access_token             String?
+  expires_at               Int?
+  token_type               String?
+  scope                    String?
+  id_token                 String?
+  session_state            String?
+  refresh_token_expires_in Int?
+  user                     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-    @@unique([provider, providerAccountId])
+  @@unique([provider, providerAccountId])
 }
 
 model Session {
-    id           String   @id @default(cuid())
-    sessionToken String   @unique
-    userId       String
-    expires      DateTime
-    user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model User {
-    id            String    @id @default(cuid())
-    name          String?
-    email         String?   @unique
-    emailVerified DateTime?
-    image         String?
-    accounts      Account[]
-    sessions      Session[]
-    bases         Base[]
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  accounts      Account[]
+  bases         Base[]
+  sessions      Session[]
 }
 
 model VerificationToken {
-    identifier String
-    token      String   @unique
-    expires    DateTime
+  identifier String
+  token      String   @unique
+  expires    DateTime
 
-    @@unique([identifier, token])
+  @@unique([identifier, token])
 }
 
 model Base {
-  id      String @id @default(uuid())
-  name    String
-  userId  String
-  user    User @relation(fields: [userId], references: [id])
-  tables  Table[]
+  id     String  @id @default(uuid())
+  name   String
+  userId String
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tables Table[]
 }
 
 model Table {
-  id      String @id @default(uuid())
-  name    String
-  baseId  String
-  base    Base @relation(fields: [baseId], references: [id])
-  columns Column[]
-  rows    Row[]
-  views   View[]
+  id            String   @id @default(uuid())
+  name          String
+  baseId        String
+  columns       Column[]
+  rows          Row[]
+  base          Base     @relation(fields: [baseId], references: [id], onDelete: Cascade)
+  views         View[]   @relation("TableViews")
+  activeViewId  String?  @unique
+  activeView    View?    @relation("ActiveView", fields: [activeViewId], references: [id])
 }
 
 model Column {
-  id      String @id @default(uuid())
-  name    String
-  type    String // "TEXT" or "NUMBER"
-  tableId String
-  table   Table @relation(fields: [tableId], references: [id])
-  cells   Cell[]
+  id            String   @id @default(uuid())
+  name          String
+  type          ColumnType
+  tableId       String
+
+  table         Table    @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  cells         Cell[]
+  filters       Filter[]
+  sortOrders    SortOrder[]
+  hiddenColumns HiddenColumn[]
+
+  @@index([tableId])
+}
+
+enum ColumnType {
+  TEXT
+  NUMBER
 }
 
 model Row {
   id      String @id @default(uuid())
   tableId String
-  table   Table @relation(fields: [tableId], references: [id])
   cells   Cell[]
+  table   Table  @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@index([tableId])
 }
 
 model Cell {
   id       String @id @default(uuid())
   rowId    String
-  row      Row @relation(fields: [rowId], references: [id])
   columnId String
-  column   Column @relation(fields: [columnId], references: [id])
   value    String
+  column   Column @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  row      Row    @relation(fields: [rowId], references: [id], onDelete: Cascade)
+
+  @@index([rowId])
+  @@index([columnId])
 }
 
 model View {
-  id        String   @id @default(uuid())
-  name      String
-  tableId   String
-  table     Table    @relation(fields: [tableId], references: [id], onDelete: Cascade)
-  filters   Json
-  sortOrder Json
-  hiddenCols Json
-  createdBy String
-  createdAt DateTime @default(now())
-
+  id              String         @id @default(uuid())
+  name            String
+  isDefault       Boolean        @default(false)
+  tableId         String
+  table           Table          @relation("TableViews", fields: [tableId], references: [id], onDelete: Cascade)
+  filters         ViewFilter[]
+  sorts           ViewSort[]
+  hidden          ViewHiddenColumn[]
+  activeForTable  Table?         @relation("ActiveView")
   @@unique([name, tableId])
+}
+
+model Filter {
+  id                 String              @id @default(uuid())
+  columnId           String
+  comparisonFunction ComparisonFunction
+  comparisonValue    String?
+  column             Column              @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  views              ViewFilter[]
+  isActive           Boolean             @default(true)
+  @@unique([columnId, comparisonFunction, comparisonValue])
+}
+
+enum ComparisonFunction {
+  EQUALS
+  NOT_EQUALS
+  GREATER_THAN
+  LESS_THAN
+  GREATER_THAN_OR_EQUAL
+  LESS_THAN_OR_EQUAL
+  CONTAINS
+  NOT_CONTAINS
+  IS_EMPTY
+  IS_NOT_EMPTY
+}
+
+model SortOrder {
+  id       String   @id @default(uuid())
+  columnId String
+  order    SortDirection
+  column   Column   @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  views    ViewSort[]
+  isActive Boolean  @default(true)
+  @@unique([columnId, order])
+}
+
+enum SortDirection {
+  ASC
+  DESC
+}
+
+model HiddenColumn {
+  id       String  @id @default(uuid())
+  columnId String
+  column   Column  @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  views    ViewHiddenColumn[]
+  isActive Boolean             @default(true)
+  @@unique([columnId])
+}
+
+model ViewFilter {
+  id       String @id @default(uuid())
+  viewId   String
+  filterId String
+
+  view     View   @relation(fields: [viewId], references: [id], onDelete: Cascade)
+  filter   Filter @relation(fields: [filterId], references: [id], onDelete: Cascade)
+
+  @@unique([viewId, filterId])
+}
+
+model ViewSort {
+  id         String     @id @default(uuid())
+  viewId     String
+  sortOrderId String
+
+  view       View       @relation(fields: [viewId], references: [id], onDelete: Cascade)
+  sortOrder  SortOrder  @relation(fields: [sortOrderId], references: [id], onDelete: Cascade)
+
+  @@unique([viewId, sortOrderId])
+}
+
+model ViewHiddenColumn {
+  id           String  @id @default(uuid())
+  viewId       String
+  hiddenColumnId String
+
+  view         View     @relation(fields: [viewId], references: [id], onDelete: Cascade)
+  hiddenColumn HiddenColumn @relation(fields: [hiddenColumnId], references: [id], onDelete: Cascade)
+
+  @@unique([viewId, hiddenColumnId])
 }

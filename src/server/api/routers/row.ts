@@ -1,18 +1,224 @@
-import { createTRPCRouter, protectedProcedure, publicProcedure } from "../trpc";
+import type { Cell } from "@prisma/client";
+import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { z } from "zod";
 
-export const rowRouter = createTRPCRouter({
-  getAllRows: publicProcedure.query(async ({ ctx }) => {
-    return await ctx.db.row.findMany({});
-  }),
+const validComparisonFunctions = [
+  "EQUALS",
+  "NOT_EQUALS",
+  "GREATER_THAN",
+  "LESS_THAN",
+  "GREATER_THAN_OR_EQUAL",
+  "LESS_THAN_OR_EQUAL",
+  "CONTAINS",
+  "NOT_CONTAINS",
+  "IS_EMPTY",
+  "IS_NOT_EMPTY",
+] as const;
 
+export const rowRouter = createTRPCRouter({
   getRowsByTable: protectedProcedure
-    .input(z.object({ tableId: z.string() }))
+    .input(
+      z.object({
+        tableId: z.string(),
+        filters: z
+          .array(
+            z.object({
+              columnId: z.string(),
+              comparisonFunction: z.enum(validComparisonFunctions),
+              comparisonValue: z.string().optional(),
+            }),
+          )
+          .optional(),
+        sortOrders: z
+          .array(
+            z.object({
+              columnId: z.string(),
+              order: z.enum(["ASC", "DESC"]),
+            }),
+          )
+          .optional(),
+      }),
+    )
     .query(async ({ ctx, input }) => {
-      return await ctx.db.row.findMany({
-        where: { tableId: input.tableId },
-        include: { cells: true }, // Fetch row cells
-      });
+      // Use Prisma's queryRaw to execute raw SQL for complete database-level operations
+
+      let query = `
+      WITH filtered_rows AS (
+        SELECT DISTINCT r.id
+        FROM "Row" r
+        JOIN "Cell" c ON r.id = c."rowId"
+        JOIN "Column" col ON c."columnId" = col.id
+        WHERE r."tableId" = $1
+    `;
+
+      const params: unknown[] = [input.tableId];
+      let paramIndex = 2;
+
+      // Add filter conditions
+      if (input.filters && input.filters.length > 0) {
+        const filterGroups: string[] = [];
+
+        for (const filter of input.filters) {
+          const { columnId, comparisonFunction, comparisonValue } = filter;
+
+          let condition = `(c."columnId" = $${paramIndex} AND `;
+          params.push(columnId);
+          paramIndex++;
+
+          switch (comparisonFunction) {
+            case "EQUALS":
+              condition += `c.value = $${paramIndex})`;
+              params.push(comparisonValue);
+              paramIndex++;
+              break;
+
+            case "NOT_EQUALS":
+              condition += `c.value <> $${paramIndex})`;
+              params.push(comparisonValue);
+              paramIndex++;
+              break;
+
+            case "GREATER_THAN":
+              condition += `
+          CASE 
+            WHEN col.type = 'NUMBER' THEN CAST(c.value AS NUMERIC) > CAST($${paramIndex} AS NUMERIC)
+            ELSE c.value > $${paramIndex}
+          END)`;
+              params.push(comparisonValue);
+              paramIndex++;
+              break;
+
+            case "LESS_THAN":
+              condition += `
+          CASE 
+            WHEN col.type = 'NUMBER' THEN CAST(c.value AS NUMERIC) < CAST($${paramIndex} AS NUMERIC)
+            ELSE c.value < $${paramIndex}
+          END)`;
+              params.push(comparisonValue);
+              paramIndex++;
+              break;
+
+            case "GREATER_THAN_OR_EQUAL":
+              condition += `
+          CASE 
+            WHEN col.type = 'NUMBER' THEN CAST(c.value AS NUMERIC) >= CAST($${paramIndex} AS NUMERIC)
+            ELSE c.value >= $${paramIndex}
+          END)`;
+              params.push(comparisonValue);
+              paramIndex++;
+              break;
+
+            case "LESS_THAN_OR_EQUAL":
+              condition += `
+          CASE 
+            WHEN col.type = 'NUMBER' THEN CAST(c.value AS NUMERIC) <= CAST($${paramIndex} AS NUMERIC)
+            ELSE c.value <= $${paramIndex}
+          END)`;
+              params.push(comparisonValue);
+              paramIndex++;
+              break;
+
+            case "CONTAINS":
+              condition += `c.value ILIKE $${paramIndex})`;
+              params.push(`%${comparisonValue}%`);
+              paramIndex++;
+              break;
+
+            case "NOT_CONTAINS":
+              condition += `NOT (c.value ILIKE $${paramIndex}))`;
+              params.push(`%${comparisonValue}%`);
+              paramIndex++;
+              break;
+
+            case "IS_EMPTY":
+              condition += `(c.value IS NULL OR c.value = ''))`;
+              break;
+
+            case "IS_NOT_EMPTY":
+              condition += `(c.value IS NOT NULL AND c.value <> ''))`;
+              break;
+
+            default:
+              throw new Error(
+                `Unsupported comparison function: ${comparisonFunction as string}`,
+              );
+          }
+
+          filterGroups.push(condition);
+        }
+
+        if (filterGroups.length > 0) {
+          query += ` AND (${filterGroups.join(" OR ")})`;
+        }
+      }
+
+      query += `
+      )
+      SELECT r.*, 
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'id', c.id,
+              'value', c.value,
+              'columnId', c."columnId",
+              'rowId', c."rowId",
+              'column', json_build_object(
+                'id', col.id,
+                'name', col.name,
+                'type', col.type
+              )
+            ) 
+          ) FILTER (WHERE c.id IS NOT NULL),
+          '[]'::json
+        ) as cells
+      FROM filtered_rows fr
+      JOIN "Row" r ON fr.id = r.id
+      LEFT JOIN "Cell" c ON r.id = c."rowId"
+      LEFT JOIN "Column" col ON c."columnId" = col.id
+      GROUP BY r.id
+    `;
+
+      // Add sorting logic
+      if (input.sortOrders && input.sortOrders.length > 0) {
+        const sortClauses: string[] = [];
+
+        for (const sortOrder of input.sortOrders) {
+          // Join to specific sort cells with lateral join approach
+          const sortIdx = paramIndex;
+          params.push(sortOrder.columnId);
+          paramIndex++;
+
+          const direction = sortOrder.order === "DESC" ? "DESC" : "ASC";
+
+          // Use a lateral join to get the correct sort values efficiently
+          sortClauses.push(`
+          (SELECT c.value FROM "Cell" c 
+           WHERE c."rowId" = r.id AND c."columnId" = $${sortIdx}
+           LIMIT 1)
+          ${direction} NULLS LAST
+        `);
+        }
+
+        if (sortClauses.length > 0) {
+          query += ` ORDER BY ${sortClauses.join(", ")}`;
+        }
+      }
+
+      try {
+        // Execute the raw query with proper parameter binding
+        const rows = await ctx.db.$queryRawUnsafe<
+          Array<{ id: string; cells: Cell[] }>
+        >(query, ...params);
+
+        // Process results to ensure proper format
+        return rows.map((row) => ({
+          ...row,
+          cells: Array.isArray(row.cells) ? row.cells : [],
+        }));
+      } catch (error) {
+        console.error("Database query error:", error);
+        throw new Error("Failed to execute database query");
+      }
     }),
 
   getRowById: protectedProcedure
@@ -21,7 +227,7 @@ export const rowRouter = createTRPCRouter({
       return await ctx.db.row.findUnique({ where: { id: input.id } });
     }),
 
-    createRow: protectedProcedure
+  createRow: protectedProcedure
     .input(
       z.object({
         tableId: z.string(),
@@ -40,7 +246,44 @@ export const rowRouter = createTRPCRouter({
 
       if (columns.length > 0) {
         await ctx.db.cell.createMany({
-          data: columns.map(column => ({
+          data: columns.map((column) => ({
+            rowId: newRow.id,
+            columnId: column.id,
+            value: "", // Empty value
+          })),
+        });
+      }
+
+      return await ctx.db.row.findUnique({
+        where: { id: newRow.id },
+        include: { cells: true },
+      });
+    }),
+
+  // New procedure to create a row at a specific position
+  createRowAt: protectedProcedure
+    .input(
+      z.object({
+        tableId: z.string(),
+        position: z.number().optional(), // Optional position indicator
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      // For now, this just creates a new row since we don't have ordering logic
+      // In a real implementation, you'd want to add position/order fields to the Row model
+      const newRow = await ctx.db.row.create({
+        data: {
+          tableId: input.tableId,
+        },
+      });
+
+      const columns = await ctx.db.column.findMany({
+        where: { tableId: input.tableId },
+      });
+
+      if (columns.length > 0) {
+        await ctx.db.cell.createMany({
+          data: columns.map((column) => ({
             rowId: newRow.id,
             columnId: column.id,
             value: "", // Empty value
@@ -63,11 +306,11 @@ export const rowRouter = createTRPCRouter({
       });
     }),
 
-    deleteRow: protectedProcedure
+  deleteRow: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       // Delete associated cells first
-      await ctx.db.cell.deleteMany({ where: { rowId: input.id } });
+      // await ctx.db.cell.deleteMany({ where: { rowId: input.id } });
 
       return await ctx.db.row.delete({ where: { id: input.id } });
     }),

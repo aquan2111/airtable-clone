@@ -1,5 +1,6 @@
 import { createTRPCRouter, protectedProcedure, publicProcedure } from "../trpc";
 import { z } from "zod";
+import { ColumnType } from "@prisma/client";
 
 export const columnRouter = createTRPCRouter({
   getAllColumns: publicProcedure.query(async ({ ctx }) => {
@@ -24,7 +25,7 @@ export const columnRouter = createTRPCRouter({
     .input(
       z.object({
         name: z.string().min(1),
-        type: z.string().min(1),
+        type: z.nativeEnum(ColumnType),
         tableId: z.string(),
       }),
     )
@@ -62,7 +63,7 @@ export const columnRouter = createTRPCRouter({
       z.object({
         id: z.string(),
         name: z.string().optional(),
-        type: z.string().optional(),
+        type: z.nativeEnum(ColumnType).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -100,7 +101,7 @@ export const columnRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       // Delete associated cells first
-      await ctx.db.cell.deleteMany({ where: { columnId: input.id } });
+      // await ctx.db.cell.deleteMany({ where: { columnId: input.id } });
 
       return await ctx.db.column.delete({ where: { id: input.id } });
     }),

@@ -36,30 +36,30 @@ export const baseRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       // 1. First, get all table IDs that belong to this base
-      const tables = await ctx.db.table.findMany({
-        where: { baseId: input.id },
-        select: { id: true },
-      });
+      // const tables = await ctx.db.table.findMany({
+      //   where: { baseId: input.id },
+      //   select: { id: true },
+      // });
 
-      const tableIds = tables.map((table) => table.id);
+      // const tableIds = tables.map((table) => table.id);
 
-      if (tableIds.length > 0) {
-        await ctx.db.cell.deleteMany({
-          where: { row: { tableId: { in: tableIds } } },
-        });
+      // if (tableIds.length > 0) {
+      //   await ctx.db.cell.deleteMany({
+      //     where: { row: { tableId: { in: tableIds } } },
+      //   });
 
-        await ctx.db.row.deleteMany({
-          where: { tableId: { in: tableIds } },
-        });
+      //   await ctx.db.row.deleteMany({
+      //     where: { tableId: { in: tableIds } },
+      //   });
 
-        await ctx.db.column.deleteMany({
-          where: { tableId: { in: tableIds } },
-        });
-      }
+      //   await ctx.db.column.deleteMany({
+      //     where: { tableId: { in: tableIds } },
+      //   });
+      // }
 
-      await ctx.db.table.deleteMany({
-        where: { baseId: input.id },
-      });
+      // await ctx.db.table.deleteMany({
+      //   where: { baseId: input.id },
+      // });
 
       return await ctx.db.base.delete({
         where: { id: input.id },

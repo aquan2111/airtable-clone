@@ -5,6 +5,12 @@ import { columnRouter } from "~/server/api/routers/column";
 import { rowRouter } from "~/server/api/routers/row";
 import { cellRouter } from "~/server/api/routers/cell";
 import { viewRouter } from "~/server/api/routers/view";
+import { filterRouter } from "~/server/api/routers/filter";
+import { sortOrderRouter } from "~/server/api/routers//sortOrder";
+import { hiddenColumnRouter } from "~/server/api/routers/hiddenColumn";
+import { viewFilterRouter } from "./routers/viewFilter";
+import { viewSortRouter } from "./routers/viewSort";
+import { viewHiddenColumnRouter } from "./routers/viewHiddenColumn";
 import { createCallerFactory, createTRPCRouter } from "~/server/api/trpc";
 
 /**
@@ -20,6 +26,12 @@ export const appRouter = createTRPCRouter({
   row: rowRouter,
   cell: cellRouter,
   view: viewRouter,
+  filter: filterRouter,
+  sortOrder: sortOrderRouter,
+  hiddenColumn: hiddenColumnRouter,
+  viewFilter: viewFilterRouter,
+  viewSort: viewSortRouter,
+  viewHiddenColumn: viewHiddenColumnRouter
 });
 
 // export type definition of API

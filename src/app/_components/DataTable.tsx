@@ -1,271 +1,258 @@
 "use client";
 
+import { useState } from "react";
+import { api } from "~/trpc/react";
 import {
-  createColumnHelper,
-  flexRender,
-  getCoreRowModel,
-  getFilteredRowModel,
-  getSortedRowModel,
-  useReactTable,
-  type SortingState,
-  type ColumnFiltersState,
-} from "@tanstack/react-table";
-import { Trash2 } from "lucide-react";
+  PlusCircle,
+  MoreHorizontal,
+  Hash,
+  Type,
+  ChevronUp,
+  ChevronDown,
+} from "lucide-react";
+import EditableCell from "./EditableCell";
+import ColumnMenu from "./ColumnMenu";
 
-import { EditableColumnHeader } from "~/app/_components/data-table/EditableColumnHeader";
-import { EditableCell } from "~/app/_components/data-table/EditableCell";
-import { TableToolbar } from "~/app/_components/data-table/TableToolbar";
-import { useDataTable } from "~/app/_hooks/useDataTable";
-import type { DataTableProps, Row } from "~/app/_components/data-table/types";
+type DataTableProps = {
+  tableId: string;
+  viewId: string | null;
+};
 
-export default function DataTable({
-  tableId,
-}: DataTableProps): React.ReactNode {
-  const {
-    table,
-    editingCell,
-    setEditingCell,
-    editingColumn,
-    setEditingColumn,
-    sorting,
-    setSorting,
-    columnFilters,
-    setColumnFilters,
-    globalFilter,
-    setGlobalFilter,
-    deleteColumnMutation,
-    deleteRowMutation,
-    canConvertToNumberType,
-    validateCellValue,
-    handleCellValueChange,
-    handleCreateColumn,
-    handleCreateRow,
-    handleUpdateCell,
-    handleUpdateColumn,
-  } = useDataTable(tableId);
+interface Filter {
+  columnId: string;
+  comparisonFunction:
+    | "EQUALS"
+    | "NOT_EQUALS"
+    | "GREATER_THAN"
+    | "LESS_THAN"
+    | "GREATER_THAN_OR_EQUAL"
+    | "LESS_THAN_OR_EQUAL"
+    | "CONTAINS"
+    | "NOT_CONTAINS"
+    | "IS_EMPTY"
+    | "IS_NOT_EMPTY";
+  comparisonValue: string;
+}
+interface SortOrder {
+  columnId: string;
+  order: "ASC" | "DESC";
+}
 
-  // TanStack Table Setup
-  const columnHelper = createColumnHelper<Row>();
+export default function DataTable({ tableId, viewId }: DataTableProps) {
+  const [openColumnMenu, setOpenColumnMenu] = useState<string | null>(null);
 
-  const generateColumns = () => {
-    if (!table) return [];
+  const utils = api.useUtils();
 
-    // Create column definitions
-    const columns = table.columns.map((col) =>
-      columnHelper.accessor(
-        (row) => {
-          const cell = row.cells?.find((c) => c.columnId === col.id);
-          return cell?.value ?? "";
-        },
-        {
-          id: col.id,
-          header: ({ column }) => (
-            <div className="flex flex-col">
-              <div className="flex items-center justify-between">
-                <EditableColumnHeader
-                  column={col}
-                  isEditing={editingColumn?.id === col.id}
-                  editValue={
-                    editingColumn?.id === col.id ? editingColumn.name : ""
-                  }
-                  editType={
-                    editingColumn?.id === col.id ? editingColumn.type : col.type
-                  }
-                  onEditChange={(value) =>
-                    setEditingColumn((prev) =>
-                      prev ? { ...prev, name: value } : null,
-                    )
-                  }
-                  onTypeChange={(type) =>
-                    setEditingColumn((prev) =>
-                      prev ? { ...prev, type } : null,
-                    )
-                  }
-                  onSave={() => {
-                    if (editingColumn) {
-                      handleUpdateColumn(
-                        col.id,
-                        editingColumn.name,
-                        editingColumn.type,
-                      );
-                    }
-                  }}
-                  onCancel={() => setEditingColumn(null)}
-                  onStartEdit={() =>
-                    setEditingColumn({
-                      id: col.id,
-                      name: col.name,
-                      type: col.type,
-                    })
-                  }
-                  onDelete={() => deleteColumnMutation.mutate({ id: col.id })}
-                  hasNonNumericValues={!canConvertToNumberType(col.id)}
-                />
+  const { data: columns = [] } = api.column.getColumnsByTable.useQuery(
+    { tableId },
+    { enabled: !!tableId }
+  );
 
-                {/* Prominent Sort Button */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    column.toggleSorting();
-                  }}
-                  className="ml-2 flex h-7 w-7 items-center justify-center rounded-full bg-gray-200 hover:bg-gray-300"
-                  title="Toggle sort"
-                >
-                  {column.getIsSorted() === "asc"
-                    ? "🔼"
-                    : column.getIsSorted() === "desc"
-                      ? "🔽"
-                      : "⇅"}
-                </button>
-              </div>
-            </div>
-          ),
-
-          cell: ({ row, column }) => {
-            const rowId = row.original.id;
-            const columnId = column.id;
-            const cell = row.original.cells?.find(
-              (c) => c.columnId === columnId,
-            );
-            const cellValue = cell?.value ?? "";
-            const isEditing =
-              editingCell?.rowId === rowId &&
-              editingCell?.columnId === columnId;
-
-            const columnDef = table.columns.find((c) => c.id === columnId);
-            const isNumberType = columnDef?.type === "NUMBER";
-
-            return (
-              <EditableCell
-                value={cellValue}
-                isEditing={isEditing}
-                editValue={isEditing ? editingCell.value : ""}
-                onChange={handleCellValueChange}
-                onSave={handleUpdateCell}
-                onCancel={() => setEditingCell(null)}
-                onStartEdit={() => {
-                  const columnType =
-                    table.columns.find((c) => c.id === columnId)?.type ??
-                    "TEXT";
-                  const validationError = validateCellValue(
-                    cellValue,
-                    columnType,
-                  );
-
-                  setEditingCell({
-                    rowId,
-                    columnId,
-                    cellId: cell?.id,
-                    value: cellValue,
-                    validationError,
-                  });
-                }}
-                isNumberType={isNumberType}
-                validationError={isEditing ? editingCell.validationError : null}
-              />
-            );
-          },
-        },
-      ),
+  const { data: hiddenColumns = [] } =
+    api.hiddenColumn.getAllActiveHiddenColumnsForTable.useQuery(
+      { tableId },
+      { enabled: !!tableId }
     );
 
-    // Add row actions column with proper type handling
-    return [
-      ...columns,
-      columnHelper.accessor((row) => row.id, {
-        id: "actions",
-        header: () => <span>Actions</span>,
-        cell: ({ row }) => (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              deleteRowMutation.mutate({ id: row.original.id });
-            }}
-            className="cursor-pointer text-red-500 disabled:cursor-not-allowed"
-          >
-            <Trash2 size={16} />
-          </button>
-        ),
-      }),
-    ];
-  };
+  const hiddenColumnIds = new Set(hiddenColumns.map((h) => h.columnId));
+  const visibleColumns = columns.filter((col) => !hiddenColumnIds.has(col.id));
 
-  const columns = generateColumns();
-  const data = table?.rows ?? [];
+  const { data: filters = [] } =
+    api.filter.getAllActiveFiltersForTable.useQuery(
+      { tableId },
+      { enabled: !!tableId }
+    );
 
-  const tableInstance = useReactTable({
-    data,
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    state: {
-      sorting: sorting,
-      columnFilters: columnFilters,
-      globalFilter,
+  const { data: sortOrders = [] } =
+    api.sortOrder.getAllActiveSortsForTable.useQuery(
+      { tableId },
+      { enabled: !!tableId }
+    );
+
+  const transformedFilters = viewId
+    ? filters.map(({ columnId, comparisonFunction, comparisonValue }) => ({
+        columnId,
+        comparisonFunction,
+        comparisonValue: comparisonValue ?? undefined,
+      }))
+    : undefined;
+
+  const { data: rows = [] } = api.row.getRowsByTable.useQuery(
+    {
+      tableId,
+      filters: transformedFilters,
+      sortOrders: viewId ? sortOrders : undefined,
     },
-    onSortingChange: setSorting,
-    onColumnFiltersChange: setColumnFilters,
-    onGlobalFilterChange: setGlobalFilter,
+    { enabled: !!tableId }
+  );
+
+  const addRow = api.row.createRow.useMutation({
+    onSuccess: () => {
+      void utils.row.getRowsByTable.invalidate({ tableId });
+    },
   });
 
-  if (!table) {
-    return <div className="p-4 text-center">Loading table data...</div>;
-  }
+  const addColumn = api.column.createColumn.useMutation({
+    onSuccess: () => {
+      void utils.column.getColumnsByTable.invalidate({ tableId });
+    },
+  });
+
+  const deleteRow = api.row.deleteRow.useMutation({
+    onSuccess: () => {
+      void utils.row.getRowsByTable.invalidate({ tableId });
+    },
+  });
+
+  const handleAddRow = () => {
+    void addRow.mutate({ tableId });
+  };
+
+  const handleAddColumn = () => {
+    void addColumn.mutate({
+      tableId,
+      name: `Column ${columns.length + 1}`,
+      type: "TEXT",
+    });
+  };
+
+  const handleDeleteRow = (rowId: string) => {
+    void deleteRow.mutate({ id: rowId });
+  };
+
+  const handleContextMenu = (e: React.MouseEvent, rowId: string) => {
+    e.preventDefault();
+    const confirmDelete = window.confirm("Delete this row?");
+    if (confirmDelete) {
+      handleDeleteRow(rowId);
+    }
+  };
+
+  const { data: activeFilters = [] } = tableId
+    ? api.filter.getAllActiveFiltersForTable.useQuery(
+        { tableId },
+        { enabled: !!tableId }
+      )
+    : { data: [] as Filter[] };
+
+  const { data: activeSorts = [] } = tableId
+    ? api.sortOrder.getAllActiveSortsForTable.useQuery(
+        { tableId },
+        { enabled: !!tableId }
+      )
+    : { data: [] as SortOrder[] };
 
   return (
-    <div className="p-4">
-      <TableToolbar
-        onAddColumn={handleCreateColumn}
-        onAddRow={handleCreateRow}
-        globalFilter={globalFilter}
-        onGlobalFilterChange={setGlobalFilter}
-      />
-
-      {/* TanStack Table */}
-      <div className="overflow-hidden rounded border">
-        <table className="w-full">
-          <thead>
-            {tableInstance.getHeaderGroups().map((headerGroup) => (
-              <tr key={headerGroup.id} className="bg-gray-200">
-                {headerGroup.headers.map((header) => (
+    <div className="flex-1 overflow-auto">
+      <div className="inline-block min-w-full">
+        <div className="overflow-x-auto">
+          <table className="min-w-full border-collapse">
+            <thead>
+              <tr className="border-b bg-gray-50">
+                <th className="w-10 px-2 py-3 text-left text-xs font-medium tracking-wider text-gray-500 uppercase">
+                  #
+                </th>
+                {visibleColumns.map((column) => (
                   <th
-                    key={header.id}
-                    className="cursor-pointer border p-2 text-left"
-                    onClick={() => header.column.toggleSorting()}
+                    key={column.id}
+                    className="group relative px-3 py-3 text-left text-xs font-medium tracking-wider text-gray-500 uppercase"
                   >
-                    {flexRender(
-                      header.column.columnDef.header,
-                      header.getContext(),
+                    <div className="flex w-full items-center justify-between">
+                      <div className="flex items-center">
+                        {column.type === "TEXT" ? (
+                          <Type size={14} className="mr-1 text-gray-400" />
+                        ) : (
+                          <Hash size={14} className="mr-1 text-gray-400" />
+                        )}
+                        <span>{column.name}</span>
+                        {activeSorts?.find(
+                          (sort: SortOrder) =>
+                            sort.columnId === column.id && sort.order === "ASC"
+                        ) && (
+                          <ChevronUp size={14} className="ml-1 text-blue-500" />
+                        )}
+                        {activeSorts?.find(
+                          (sort: SortOrder) =>
+                            sort.columnId === column.id && sort.order === "DESC"
+                        ) && (
+                          <ChevronDown size={14} className="ml-1 text-blue-500" />
+                        )}
+                      </div>
+                      <button
+                        onClick={() =>
+                          setOpenColumnMenu(
+                            openColumnMenu === column.id ? null : column.id
+                          )
+                        }
+                        className="ml-1 rounded p-1 opacity-0 group-hover:opacity-100 hover:bg-gray-200"
+                      >
+                        <MoreHorizontal size={14} />
+                      </button>
+                    </div>
+
+                    {openColumnMenu === column.id && (
+                      <ColumnMenu
+                        column={column}
+                        tableId={tableId}
+                        viewId={viewId}
+                        onClose={() => setOpenColumnMenu(null)}
+                      />
                     )}
                   </th>
                 ))}
+                <th className="w-10 px-2 py-3">
+                  <button
+                    onClick={handleAddColumn}
+                    className="p-1 text-gray-500 hover:text-gray-700"
+                    title="Add column"
+                  >
+                    <PlusCircle size={16} />
+                  </button>
+                </th>
               </tr>
-            ))}
-          </thead>
-          <tbody>
-            {tableInstance.getRowModel().rows.length ? (
-              tableInstance.getRowModel().rows.map((row) => (
-                <tr key={row.id} className="border-b hover:bg-gray-50">
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="border p-2">
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext(),
-                      )}
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={row.id} className="hover:bg-gray-50">
+                  <td
+                    className="border-r border-gray-200 px-2 py-2 text-xs whitespace-nowrap text-gray-500"
+                    onContextMenu={(e) => handleContextMenu(e, row.id)}
+                  >
+                    {index + 1}
+                  </td>
+                  {visibleColumns.map((column) => (
+                    <td
+                      key={`${row.id}-${column.id}`}
+                      className="border-b border-gray-200 px-3 py-2"
+                    >
+                      <EditableCell
+                        rowId={row.id}
+                        columnId={column.id}
+                        tableId={tableId}
+                        columnType={column.type}
+                      />
                     </td>
                   ))}
+                  <td className="w-4"></td>
                 </tr>
-              ))
-            ) : (
+              ))}
               <tr>
-                <td colSpan={columns.length} className="p-4 text-center">
-                  No data
+                <td
+                  className="border-r border-gray-200 px-2 py-2"
+                  onClick={handleAddRow}
+                >
+                  <button
+                    className="p-1 text-gray-500 hover:text-gray-700"
+                    title="Add row"
+                  >
+                    <PlusCircle size={16} />
+                  </button>
                 </td>
+                <td colSpan={visibleColumns.length + 1}></td>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
