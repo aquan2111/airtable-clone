@@ -4,7 +4,9 @@ import { faker } from "@faker-js/faker";
 
 export const tableRouter = createTRPCRouter({
   getAllTables: publicProcedure.query(async ({ ctx }) => {
-    return await ctx.db.table.findMany({});
+    return await ctx.db.table.findMany({
+      orderBy: { orderIndex: 'asc' }
+    });
   }),
 
   getTablesByBase: protectedProcedure
@@ -12,9 +14,13 @@ export const tableRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       return await ctx.db.table.findMany({
         where: { baseId: input.baseId },
+        orderBy: { orderIndex: 'asc' },
         include: {
-          columns: true,
+          columns: {
+            orderBy: { orderIndex: 'asc' }
+          },
           rows: {
+            orderBy: { orderIndex: 'asc' },
             include: {
               cells: true,
             },
@@ -31,8 +37,11 @@ export const tableRouter = createTRPCRouter({
       return await ctx.db.table.findUnique({
         where: { id: input.id },
         include: {
-          columns: true,
+          columns: {
+            orderBy: { orderIndex: 'asc' }
+          },
           rows: {
+            orderBy: { orderIndex: 'asc' },
             include: {
               cells: true,
             },
@@ -51,34 +60,49 @@ export const tableRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      // Find the highest orderIndex in the base
+      const highestOrderTable = await ctx.db.table.findFirst({
+        where: { baseId: input.baseId },
+        orderBy: { orderIndex: 'desc' },
+        select: { orderIndex: true }
+      });
+      
+      const newOrderIndex = highestOrderTable ? highestOrderTable.orderIndex + 1 : 0;
+      
       const table = await ctx.db.table.create({
         data: {
           name: input.name,
           baseId: input.baseId,
+          orderIndex: newOrderIndex, // Set the new order index
         },
       });
 
-      // Create default columns
-      const columns = await ctx.db.column.createMany({
+      // Create default columns with orderIndex
+      await ctx.db.column.createMany({
         data: [
-          { name: "Name", type: "TEXT", tableId: table.id },
-          { name: "Age", type: "NUMBER", tableId: table.id },
+          { name: "Name", type: "TEXT", tableId: table.id, orderIndex: 0 },
+          { name: "Age", type: "NUMBER", tableId: table.id, orderIndex: 1 },
         ],
       });
 
       // Fetch created columns to map their IDs
       const createdColumns = await ctx.db.column.findMany({
         where: { tableId: table.id },
+        orderBy: { orderIndex: 'asc' }
       });
 
-      // Create 5 default rows with random data
-      const rows = await ctx.db.row.createMany({
-        data: Array.from({ length: 5 }).map(() => ({ tableId: table.id })),
+      // Create 5 default rows with random data and orderIndex
+      await ctx.db.row.createMany({
+        data: Array.from({ length: 5 }).map((_, index) => ({ 
+          tableId: table.id,
+          orderIndex: index
+        })),
       });
 
       // Fetch created rows
       const createdRows = await ctx.db.row.findMany({
         where: { tableId: table.id },
+        orderBy: { orderIndex: 'asc' }
       });
 
       // Generate fake data for each row and column
@@ -162,6 +186,7 @@ export const tableRouter = createTRPCRouter({
         id: z.string(),
         name: z.string().optional(),
         activeViewId: z.string().optional(),
+        orderIndex: z.number().optional(), // Allow updating the order index
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -174,8 +199,32 @@ export const tableRouter = createTRPCRouter({
   deleteTable: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      return await ctx.db.table.delete({
+      // Get the table to be deleted
+      const tableToDelete = await ctx.db.table.findUnique({
+        where: { id: input.id },
+        select: { baseId: true, orderIndex: true }
+      });
+
+      if (!tableToDelete) {
+        throw new Error("Table not found");
+      }
+
+      // Delete the table
+      await ctx.db.table.delete({
         where: { id: input.id },
       });
+
+      // Update the orderIndex of all tables with a higher orderIndex
+      await ctx.db.table.updateMany({
+        where: {
+          baseId: tableToDelete.baseId,
+          orderIndex: { gt: tableToDelete.orderIndex }
+        },
+        data: {
+          orderIndex: { decrement: 1 }
+        }
+      });
+
+      return { success: true };
     }),
 });

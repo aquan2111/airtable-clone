@@ -4,7 +4,9 @@ import { ColumnType } from "@prisma/client";
 
 export const columnRouter = createTRPCRouter({
   getAllColumns: publicProcedure.query(async ({ ctx }) => {
-    return await ctx.db.column.findMany({});
+    return await ctx.db.column.findMany({
+      orderBy: { orderIndex: 'asc' }
+    });
   }),
 
   getColumnsByTable: protectedProcedure
@@ -12,6 +14,7 @@ export const columnRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       return await ctx.db.column.findMany({
         where: { tableId: input.tableId },
+        orderBy: { orderIndex: 'asc' }
       });
     }),
 
@@ -30,11 +33,21 @@ export const columnRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      // Find the highest orderIndex in the table
+      const highestOrderColumn = await ctx.db.column.findFirst({
+        where: { tableId: input.tableId },
+        orderBy: { orderIndex: 'desc' },
+        select: { orderIndex: true }
+      });
+      
+      const newOrderIndex = highestOrderColumn ? highestOrderColumn.orderIndex + 1 : 0;
+      
       const newColumn = await ctx.db.column.create({
         data: {
           name: input.name,
           type: input.type,
           tableId: input.tableId,
+          orderIndex: newOrderIndex, // Set the new order index
         },
       });
 
@@ -64,6 +77,7 @@ export const columnRouter = createTRPCRouter({
         id: z.string(),
         name: z.string().optional(),
         type: z.nativeEnum(ColumnType).optional(),
+        orderIndex: z.number().optional(), // Allow updating the order index
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -100,9 +114,30 @@ export const columnRouter = createTRPCRouter({
   deleteColumn: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      // Delete associated cells first
-      // await ctx.db.cell.deleteMany({ where: { columnId: input.id } });
+      // Get the column to be deleted
+      const columnToDelete = await ctx.db.column.findUnique({
+        where: { id: input.id },
+        select: { tableId: true, orderIndex: true }
+      });
 
-      return await ctx.db.column.delete({ where: { id: input.id } });
+      if (!columnToDelete) {
+        throw new Error("Column not found");
+      }
+
+      // Delete the column
+      await ctx.db.column.delete({ where: { id: input.id } });
+
+      // Update the orderIndex of all columns with a higher orderIndex
+      await ctx.db.column.updateMany({
+        where: {
+          tableId: columnToDelete.tableId,
+          orderIndex: { gt: columnToDelete.orderIndex }
+        },
+        data: {
+          orderIndex: { decrement: 1 }
+        }
+      });
+
+      return { success: true };
     }),
 });

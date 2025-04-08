@@ -40,8 +40,7 @@ export const rowRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      // Use Prisma's queryRaw to execute raw SQL for complete database-level operations
-
+      // Modified to first select rows in order by orderIndex
       let query = `
       WITH filtered_rows AS (
         SELECT DISTINCT r.id
@@ -202,6 +201,9 @@ export const rowRouter = createTRPCRouter({
         if (sortClauses.length > 0) {
           query += ` ORDER BY ${sortClauses.join(", ")}`;
         }
+      } else {
+        // Default ordering by orderIndex when no other sort is specified
+        query += ` ORDER BY r."orderIndex" ASC`;
       }
 
       try {
@@ -234,9 +236,19 @@ export const rowRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      // Find the highest orderIndex in the table
+      const highestOrderRow = await ctx.db.row.findFirst({
+        where: { tableId: input.tableId },
+        orderBy: { orderIndex: 'desc' },
+        select: { orderIndex: true }
+      });
+      
+      const newOrderIndex = highestOrderRow ? highestOrderRow.orderIndex + 1 : 0;
+
       const newRow = await ctx.db.row.create({
         data: {
           tableId: input.tableId,
+          orderIndex: newOrderIndex, // Set the new order index
         },
       });
 
@@ -260,7 +272,7 @@ export const rowRouter = createTRPCRouter({
       });
     }),
 
-  // New procedure to create a row at a specific position
+  // Updated procedure to create a row at a specific position
   createRowAt: protectedProcedure
     .input(
       z.object({
@@ -269,11 +281,37 @@ export const rowRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      // For now, this just creates a new row since we don't have ordering logic
-      // In a real implementation, you'd want to add position/order fields to the Row model
+      let targetOrderIndex: number;
+      
+      if (input.position !== undefined) {
+        // If a specific position is provided, use it
+        targetOrderIndex = input.position;
+        
+        // Make space for the new row by incrementing the orderIndex of all rows at or beyond this position
+        await ctx.db.row.updateMany({
+          where: {
+            tableId: input.tableId,
+            orderIndex: { gte: targetOrderIndex }
+          },
+          data: {
+            orderIndex: { increment: 1 }
+          }
+        });
+      } else {
+        // If no position is provided, add to the end
+        const highestOrderRow = await ctx.db.row.findFirst({
+          where: { tableId: input.tableId },
+          orderBy: { orderIndex: 'desc' },
+          select: { orderIndex: true }
+        });
+        
+        targetOrderIndex = highestOrderRow ? highestOrderRow.orderIndex + 1 : 0;
+      }
+
       const newRow = await ctx.db.row.create({
         data: {
           tableId: input.tableId,
+          orderIndex: targetOrderIndex,
         },
       });
 
@@ -298,7 +336,11 @@ export const rowRouter = createTRPCRouter({
     }),
 
   updateRow: protectedProcedure
-    .input(z.object({ id: z.string(), tableId: z.string().optional() }))
+    .input(z.object({ 
+      id: z.string(), 
+      tableId: z.string().optional(),
+      orderIndex: z.number().optional() // Allow updating the order index
+    }))
     .mutation(async ({ ctx, input }) => {
       return await ctx.db.row.update({
         where: { id: input.id },
@@ -309,9 +351,30 @@ export const rowRouter = createTRPCRouter({
   deleteRow: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      // Delete associated cells first
-      // await ctx.db.cell.deleteMany({ where: { rowId: input.id } });
+      // Get the row to be deleted
+      const rowToDelete = await ctx.db.row.findUnique({
+        where: { id: input.id },
+        select: { tableId: true, orderIndex: true }
+      });
 
-      return await ctx.db.row.delete({ where: { id: input.id } });
+      if (!rowToDelete) {
+        throw new Error("Row not found");
+      }
+
+      // Delete the row
+      await ctx.db.row.delete({ where: { id: input.id } });
+
+      // Update the orderIndex of all rows with a higher orderIndex
+      await ctx.db.row.updateMany({
+        where: {
+          tableId: rowToDelete.tableId,
+          orderIndex: { gt: rowToDelete.orderIndex }
+        },
+        data: {
+          orderIndex: { decrement: 1 }
+        }
+      });
+
+      return { success: true };
     }),
 });
