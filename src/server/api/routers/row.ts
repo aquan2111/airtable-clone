@@ -272,69 +272,6 @@ export const rowRouter = createTRPCRouter({
       });
     }),
 
-  // Updated procedure to create a row at a specific position
-  createRowAt: protectedProcedure
-    .input(
-      z.object({
-        tableId: z.string(),
-        position: z.number().optional(), // Optional position indicator
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      let targetOrderIndex: number;
-      
-      if (input.position !== undefined) {
-        // If a specific position is provided, use it
-        targetOrderIndex = input.position;
-        
-        // Make space for the new row by incrementing the orderIndex of all rows at or beyond this position
-        await ctx.db.row.updateMany({
-          where: {
-            tableId: input.tableId,
-            orderIndex: { gte: targetOrderIndex }
-          },
-          data: {
-            orderIndex: { increment: 1 }
-          }
-        });
-      } else {
-        // If no position is provided, add to the end
-        const highestOrderRow = await ctx.db.row.findFirst({
-          where: { tableId: input.tableId },
-          orderBy: { orderIndex: 'desc' },
-          select: { orderIndex: true }
-        });
-        
-        targetOrderIndex = highestOrderRow ? highestOrderRow.orderIndex + 1 : 0;
-      }
-
-      const newRow = await ctx.db.row.create({
-        data: {
-          tableId: input.tableId,
-          orderIndex: targetOrderIndex,
-        },
-      });
-
-      const columns = await ctx.db.column.findMany({
-        where: { tableId: input.tableId },
-      });
-
-      if (columns.length > 0) {
-        await ctx.db.cell.createMany({
-          data: columns.map((column) => ({
-            rowId: newRow.id,
-            columnId: column.id,
-            value: "", // Empty value
-          })),
-        });
-      }
-
-      return await ctx.db.row.findUnique({
-        where: { id: newRow.id },
-        include: { cells: true },
-      });
-    }),
-
   updateRow: protectedProcedure
     .input(z.object({ 
       id: z.string(), 
