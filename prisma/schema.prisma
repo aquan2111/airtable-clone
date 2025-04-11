@@ -103,6 +103,7 @@ model Row {
   table       Table  @relation(fields: [tableId], references: [id], onDelete: Cascade)
   @@index([tableId, orderIndex])
   @@index([tableId])
+  @@index([id, tableId])
 }
 
 model Cell {
@@ -112,9 +113,10 @@ model Cell {
   value    String
   column   Column @relation(fields: [columnId], references: [id], onDelete: Cascade)
   row      Row    @relation(fields: [rowId], references: [id], onDelete: Cascade)
-
   @@index([rowId])
   @@index([columnId])
+  @@index([rowId, columnId])
+  @@index([columnId, value])
 }
 
 model View {

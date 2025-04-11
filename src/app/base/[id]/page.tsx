@@ -78,9 +78,6 @@ export default function BasePage({
       setSearchResults([]);
       setCurrentSearchResultIndex(-1);
     }
-    // No explicit handling needed for loading state here,
-    // as isSearching covers that for the UI.
-    // The previous results remain in the state until success or error updates it.
   }, [searchCellsQuery.data, searchCellsQuery.isSuccess, searchCellsQuery.isError, searchCellsQuery.error]); // Add dependencies
 
   useEffect(() => {

@@ -1,7 +1,7 @@
 // src/app/_components/EditableCell.tsx
 
-import { useState, useEffect, useCallback } from "react"; // Added useCallback
-import { Save, X } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Save, X, Loader2 } from "lucide-react"; // Added Loader2 for the spinner
 import { api } from "~/trpc/react";
 
 type EditableCellProps = {
@@ -9,8 +9,10 @@ type EditableCellProps = {
   columnId: string;
   tableId: string;
   columnType: string;
-  searchQuery: string;      // <-- Add prop for search term
-  isHighlighted: boolean;  // <-- Add prop to know if this cell is a search result
+  searchQuery: string;      
+  isHighlighted: boolean;  
+  cellValue: string;
+  cellId?: string;
 };
 
 // Helper function to escape special regex characters
@@ -24,53 +26,58 @@ export default function EditableCell({
   columnId,
   tableId,
   columnType,
-  searchQuery,      // <-- Destructure prop
-  isHighlighted,    // <-- Destructure prop
+  searchQuery,      
+  isHighlighted,   
+  cellValue,
+  cellId,
 }: EditableCellProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [value, setValue] = useState(''); // Current display value
   const [editValue, setEditValue] = useState(''); // Value while editing
   const [validationError, setValidationError] = useState<string | null>(null);
-
-  // Fetch all cells for the row (as per your component structure)
-  const { data: cellsData } = api.cell.getCellsByRow.useQuery(
-    { rowId },
-    { enabled: !!rowId }
-  );
+  const [isSaving, setIsSaving] = useState(false); // New state to track saving status
 
   // Update state when data for the row is fetched/changed
   useEffect(() => {
-    if (cellsData) {
-      const cell = cellsData.find((c) => c.columnId === columnId);
-      const cellValue = cell?.value ?? '';
-      setValue(cellValue);
-      // Ensure editValue is also updated if not currently editing
-      // to reflect external changes. If editing, keep the user's input.
-      if (!isEditing) {
-          setEditValue(cellValue);
-      }
+    setValue(cellValue);
+    if (!isEditing) {
+      setEditValue(cellValue);
     }
-  }, [cellsData, columnId, isEditing]); // Add isEditing dependency
+  }, [cellValue, isEditing]);  
 
   const utils = api.useUtils();
 
   const updateCell = api.cell.updateCell.useMutation({
-    onSuccess: async () => {
+    onMutate: () => {
+      // Start loading state before the mutation
+      setIsSaving(true);
+    },
+    onSuccess: async (data) => {
+      // Update local value immediately with the returned data
+      setValue(data.value || '');
+      
       // Invalidate necessary queries
-      await utils.cell.getCellsByRow.invalidate({ rowId });
-      await utils.row.getRowsByTable.invalidate({ tableId });
-      // Potentially invalidate search if content changes matter
-      // await utils.cell.searchCellsInTable.invalidate();
+      await Promise.all([
+        utils.cell.getCellsByRow.invalidate({ rowId }),
+        utils.row.getRowsByTable.invalidate({ tableId }),
+      ]);
+      
+      // End loading state
+      setIsSaving(false);
     },
     onError: (error) => {
-        console.error("Failed to update cell:", error);
-        alert("Failed to save changes.");
-        // Optionally reset editValue back to original 'value' on error
-        setEditValue(value);
+      console.error("Failed to update cell:", error);
+      alert("Failed to save changes.");
+      // Reset editValue back to original 'value' on error
+      setEditValue(value);
+      setIsSaving(false);
     }
   });
 
   const handleStartEdit = () => {
+    // Don't allow editing if currently saving
+    if (isSaving) return;
+    
     setEditValue(value); // Start editing with the current display value
     setValidationError(null);
     setIsEditing(true);
@@ -108,12 +115,11 @@ export default function EditableCell({
     if (validationError) return;
 
     // Find the specific cell's ID from the fetched row data
-    const cell = cellsData?.find((c) => c.columnId === columnId);
-    if (!cell) {
-      console.error("Cell data not found for updating - cannot get cell ID");
-      setIsEditing(false); // Exit edit mode even if save failed
+    if (!cellId) {
+      console.error("Cell ID not provided - cannot update cell");
+      setIsEditing(false);
       return;
-    }
+    }    
 
     // Determine the value to save
     let valueToSave = editValue;
@@ -126,26 +132,25 @@ export default function EditableCell({
       }
     }
 
-
     // Only call mutation if the value has actually changed
     if (valueToSave !== value) {
+         // Set to non-editing state immediately (but saving state is true)
+         setIsEditing(false);
+         
          updateCell.mutate({
-            id: cell.id, // Use the specific cell ID
+            id: cellId, // Use the specific cell ID
             value: valueToSave,
          });
-         // Optimistically update display value, server will confirm/invalidate
-         setValue(valueToSave ?? '');
+         
+         // We no longer update setValue here - we'll wait for the success callback
+    } else {
+      // If no change, just exit edit mode
+      setIsEditing(false);
     }
-
-
-    setIsEditing(false);
   };
 
   // --- Highlighting Function ---
   const renderHighlightedValue = useCallback(() => {
-    // Use the 'value' state for display
-    // Only apply highlight if this cell is marked as highlighted,
-    // there's a search query, it's a TEXT column, and has content.
     if (!isHighlighted || !searchQuery || columnType !== 'TEXT' || !value) {
       // If no value, show placeholder, otherwise show plain value
       return value ? value : <span className="text-gray-400">Empty</span>;
@@ -235,15 +240,34 @@ export default function EditableCell({
   }
 
   // --- Display Mode UI ---
+  if (!cellId) {
+    return (
+      <div className="h-9 w-full animate-pulse rounded bg-gray-100" />
+    );
+  }
+  
   return (
     <div
-        // Apply consistent padding & height. `whitespace-pre-wrap` respects newlines/spaces.
-      className="min-h-[36px] cursor-pointer p-[5px] hover:bg-gray-100 text-sm whitespace-pre-wrap break-words" // Adjusted padding/height slightly
-      onClick={(e) => { e.stopPropagation(); handleStartEdit(); }} // Ensure click propagation is stopped
-      onDoubleClick={(e) => { e.stopPropagation(); handleStartEdit(); }} // Also handle double-click
+      // Apply consistent padding & height. `whitespace-pre-wrap` respects newlines/spaces.
+      className={`min-h-[36px] ${isSaving ? 'cursor-wait' : 'cursor-pointer'} p-[5px] hover:bg-gray-100 text-sm whitespace-pre-wrap break-words`}
+      onClick={(e) => { 
+        e.stopPropagation(); 
+        if (!isSaving) handleStartEdit(); 
+      }}
+      onDoubleClick={(e) => { 
+        e.stopPropagation(); 
+        if (!isSaving) handleStartEdit(); 
+      }}
     >
-      {/* Use the highlighting renderer */}
-      {renderHighlightedValue()}
+      {isSaving ? (
+        <div className="flex items-center text-blue-500">
+          <Loader2 size={14} className="mr-1 animate-spin" />
+          <span>Saving...</span>
+        </div>
+      ) : (
+        // Use the highlighting renderer
+        renderHighlightedValue()
+      )}
     </div>
   );
 }

@@ -7,6 +7,31 @@ export const cellRouter = createTRPCRouter({
     return await ctx.db.cell.findMany({});
   }),
 
+  getCellsByTable: protectedProcedure
+  .input(z.object({ tableId: z.string() }))
+  .query(async ({ ctx, input }) => {
+    const rows = await ctx.db.row.findMany({
+      where: { tableId: input.tableId },
+      select: { id: true },
+    });
+
+    const rowIds = rows.map((r) => r.id);
+
+    if (rowIds.length === 0) {
+      return [];
+    }
+
+    return await ctx.db.cell.findMany({
+      where: {
+        rowId: { in: rowIds },
+      },
+      include: {
+        row: true,
+        column: true,
+      },
+    });
+  }),
+
   getCellsByRow: protectedProcedure
     .input(z.object({ rowId: z.string() }))
     .query(async ({ ctx, input }) => {
